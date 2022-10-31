@@ -12,7 +12,7 @@ ifeq "$(perf)" "1"
 	CPPFLAGS += -D_PERF_
 endif
 
-CFLAGS+=-Wall -O2
+CFLAGS+=-Wall -O2 -lm
 CFLAGS_THREADS=$(CFLAGS) -fopenmp
 
 all: diffusion2d_serial diffusion2d_openmp diffusion2d_mpi_nb diffusion2d_mpi

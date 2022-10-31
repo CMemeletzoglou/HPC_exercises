@@ -3,6 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
+#include <limits.h>
+
+#define NO_NEIGHBOUR INT_MAX
 
 typedef struct Diagnostics_s
 {
@@ -42,13 +45,16 @@ void initialize_density(Diffusion2D *D2D)
                 // gi = rank_ * (N_ / procs_) + i; // convert local index to global index
 
                 // only works for 4 processes.. TODO : for more processes??
-                gi = floor((double)rank_ / 2) * local_N_ + i; // convert local index to global index
+                // gi = floor((double)rank_ / 2) * local_N_ + i; // convert local index to global index
+                
+                gi = floor((double)rank_ / sqrt(procs_)) * real_N_ + i; // convert local index to global index
 
                 // for (int j =(i*real_N_)+1 ; j <= real_N_; ++j)
                 
-                for (int j = 1; j < real_N_; ++j) // column traversal loop
+                for (int j = 1; j <= local_N_; ++j) // column traversal loop
                 {
-                        gj = (rank_ % 2) * local_N_ + j;
+                        // gj = (rank_ % 2) * local_N_ + j; TODO : mod N procs
+                        gj = ( rank_ % (int)sqrt(procs_) ) * real_N_ + j;
 
                         // if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((j - 1) * dr_ - 0.5 * L_) < bound)
                         if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((gj - 1) * dr_ - 0.5 * L_) < bound)
@@ -90,7 +96,8 @@ void init(Diffusion2D *D2D,
 
         // Number of rows per process. Number of rows per square tile
         // D2D->local_N_ = D2D->N_ / D2D->procs_; 
-        D2D->local_N_ = 2 * (D2D->N_ / D2D->procs_); 
+        // D2D->local_N_ = 2 * (D2D->N_ / D2D->procs_); 
+        D2D->local_N_ = (int)sqrt(procs) * (D2D->N_ / D2D->procs_); 
 
         // Small correction for the last process.
         // if (D2D->rank_ == D2D->procs_ - 1)
@@ -115,6 +122,31 @@ void init(Diffusion2D *D2D,
         initialize_density(D2D);
 }
 
+void gather_column_data(Diffusion2D *D2D, double *buf, int col_index)
+{
+        int local_N_ = D2D->local_N_;
+        int real_N_ = D2D->real_N_;
+        double *rho_start_elmnt = D2D->rho_ + col_index;
+        
+        for(int i = 1; i <= local_N_; i++)
+        {
+                *(buf + i) = *(rho_start_elmnt + (i * real_N_));                
+        }
+}
+
+void scatter_column_data(Diffusion2D *D2D, double *buf, int col_index)
+{
+        int local_N_ = D2D->local_N_;
+        int real_N_ = D2D->real_N_;
+        double *rho_start_elmnt = D2D->rho_ + col_index;
+        
+        for(int i = 1; i <= local_N_; i++)
+        {
+                *(rho_start_elmnt + (i * real_N_)) = *(buf + i);
+        }
+}
+
+
 void advance(Diffusion2D *D2D)
 {
         int N_ = D2D->N_;
@@ -126,42 +158,74 @@ void advance(Diffusion2D *D2D)
         int rank_ = D2D->rank_;
         int procs_ = D2D->procs_;
 
-        MPI_Status status[2];
+        // MPI_Status status[2];
+        MPI_Status status[4];
+        int sqrt_procs = (int)sqrt(procs_);
 
-        int prev_rank = rank_ - 1;
-        int next_rank = rank_ + 1;
+        // int prev_rank = rank_ - 1;
+        // int next_rank = rank_ + 1;
 
+        int below_rank = ((rank_ + sqrt_procs) < procs_) ? rank_ + sqrt_procs : NO_NEIGHBOUR;
+        int upper_rank = ((rank_ - sqrt_procs) >= 0) ? rank_ - sqrt_procs : NO_NEIGHBOUR;
+
+        int right_rank = ( ( ( (rank_ + 1) % sqrt_procs) ) == 0) ? NO_NEIGHBOUR : rank_ + 1;
+        int left_rank = ( ( ( rank_ % sqrt_procs) ) == 0 ) ? NO_NEIGHBOUR : rank_ - 1;
+
+        double *data_buf = calloc(local_N_, sizeof(double));        
+
+        double *rcv_buf = calloc(local_N_, sizeof(double));
+
+
+        // *************************************************************************
+        //                              COMMUNICATION PART
+        // *************************************************************************
+        
         // Exchange ALL necessary ghost cells with neighboring ranks.
-        if (prev_rank >= 0)
+        // post recv's first (?)
+        if(upper_rank != NO_NEIGHBOUR)
         {
-                MPI_Send(&rho_[           1*real_N_+1], N_, MPI_DOUBLE, prev_rank, 100, MPI_COMM_WORLD);
+                MPI_Send(&rho_[1*real_N_+1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD);
+                MPI_Recv(&rho_[0*real_N_+1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD, &status[0]);
+        }
+
+        if(below_rank != NO_NEIGHBOUR)
+        {
+                MPI_Recv(&rho_[(local_N_+1)*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD, &status[1]);
+                MPI_Send(&rho_[local_N_*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD);
+        }
+
+        if (right_rank != NO_NEIGHBOUR)
+        {
+                gather_column_data(D2D, data_buf, local_N_);
+                MPI_Send(data_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD);
 
                 // λαμβανω δεδομενα στην μια εξτρα γραμμη που εχω δεσμευσει και στην ουσια 
                 // δεν πειραζω το πρωτο πρωτο στοιχειο και το τελευταιο τελευταιο στοιχειο
-                MPI_Recv(&rho_[           0*real_N_+1], N_, MPI_DOUBLE, prev_rank, 100, MPI_COMM_WORLD, &status[0]);
-        }
-        else
-        {
-                // the purpose of this part will become
-                // clear when using asynchronous communication.
+                MPI_Recv(rcv_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD, &status[2]);
+                scatter_column_data(D2D, rcv_buf, local_N_+1);
         }
 
-        if (next_rank < procs_)
+        if (left_rank != NO_NEIGHBOUR)
         {
-                MPI_Recv(&rho_[(local_N_+1)*real_N_+1], N_, MPI_DOUBLE, next_rank, 100, MPI_COMM_WORLD, &status[1]);
-                MPI_Send(&rho_[    local_N_*real_N_+1], N_, MPI_DOUBLE, next_rank, 100, MPI_COMM_WORLD);
+                MPI_Recv(rcv_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD, &status[3]);
+                scatter_column_data(D2D, rcv_buf, 0);
+
+                gather_column_data(D2D, data_buf, 1);
+                MPI_Send(data_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD);
         }
-        else
-        {
-                // the purpose of this part will become 
-                // clear when using asynchronous communication.
-        }
+
+
+        // *************************************************************************
+        //                              COMPUTATION PART
+        // *************************************************************************
 
         // Central differences in space, forward Euler in time with Dirichlet
         // boundaries.
         for (int i = 2; i < local_N_; ++i)
         {
-                for (int j = 1; j <= N_; ++j)
+                // for (int j = 1; j <= N_; ++j)
+                // TODO : Check loop bounds etc
+                for (int j = 1; j <= local_N_; ++j)
                 {
                         rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
                                                 fac_
@@ -193,7 +257,8 @@ void advance(Diffusion2D *D2D)
         // Update the first and the last rows of each rank.
         for (int i = 1; i <= local_N_; i += local_N_- 1)
         {
-                for (int j = 1; j <= N_; ++j)
+                // for (int j = 1; j <= N_; ++j)
+                for (int j = 1; j <= local_N_; ++j)
                 {
                         rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
                                                 fac_
@@ -216,6 +281,9 @@ void advance(Diffusion2D *D2D)
         double *tmp_ = D2D->rho_tmp_;
         D2D->rho_tmp_ = D2D->rho_;
         D2D->rho_ = tmp_;
+
+        free(data_buf);
+        free(rcv_buf);
 }
 
 void compute_diagnostics(Diffusion2D *D2D, const int step, const double t)
@@ -296,7 +364,7 @@ int main(int argc, char* argv[])
         if (rank == 0)
         {
                 char diagnostics_filename[256];
-                sprintf(diagnostics_filename, "diagnostics_mpi_%d.dat", procs);
+                sprintf(diagnostics_filename, "diagnostics_mpi_square_%d.dat", procs);
                 write_diagnostics(&system, diagnostics_filename);
         }
         #endif
