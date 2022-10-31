@@ -146,7 +146,6 @@ void scatter_column_data(Diffusion2D *D2D, double *buf, int col_index)
         }
 }
 
-
 void advance(Diffusion2D *D2D)
 {
         int N_ = D2D->N_;
@@ -171,10 +170,9 @@ void advance(Diffusion2D *D2D)
         int right_rank = ( ( ( (rank_ + 1) % sqrt_procs) ) == 0) ? NO_NEIGHBOUR : rank_ + 1;
         int left_rank = ( ( ( rank_ % sqrt_procs) ) == 0 ) ? NO_NEIGHBOUR : rank_ - 1;
 
+        // do we really need two buffers (?)
         double *data_buf = calloc(local_N_, sizeof(double));        
-
         double *rcv_buf = calloc(local_N_, sizeof(double));
-
 
         // *************************************************************************
         //                              COMMUNICATION PART
