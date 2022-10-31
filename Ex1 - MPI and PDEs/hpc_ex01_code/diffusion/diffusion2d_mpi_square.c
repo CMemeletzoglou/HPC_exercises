@@ -47,14 +47,14 @@ void initialize_density(Diffusion2D *D2D)
                 // only works for 4 processes.. TODO : for more processes??
                 // gi = floor((double)rank_ / 2) * local_N_ + i; // convert local index to global index
                 
-                gi = floor((double)rank_ / sqrt(procs_)) * real_N_ + i; // convert local index to global index
+                gi = floor((double)rank_ / sqrt(procs_)) * local_N_ + i; // convert local index to global index
 
                 // for (int j =(i*real_N_)+1 ; j <= real_N_; ++j)
                 
                 for (int j = 1; j <= local_N_; ++j) // column traversal loop
                 {
                         // gj = (rank_ % 2) * local_N_ + j; TODO : mod N procs
-                        gj = ( rank_ % (int)sqrt(procs_) ) * real_N_ + j;
+                        gj = ( rank_ % (int)sqrt(procs_) ) * local_N_ + j;
 
                         // if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((j - 1) * dr_ - 0.5 * L_) < bound)
                         if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((gj - 1) * dr_ - 0.5 * L_) < bound)
@@ -130,7 +130,7 @@ void gather_column_data(Diffusion2D *D2D, double *buf, int col_index)
         
         for(int i = 1; i <= local_N_; i++)
         {
-                *(buf + i) = *(rho_start_elmnt + (i * real_N_));                
+                *(buf + i-1) = *(rho_start_elmnt + (i * real_N_));                                
         }
 }
 
@@ -142,7 +142,7 @@ void scatter_column_data(Diffusion2D *D2D, double *buf, int col_index)
         
         for(int i = 1; i <= local_N_; i++)
         {
-                *(rho_start_elmnt + (i * real_N_)) = *(buf + i);
+                *(rho_start_elmnt + (i * real_N_)) = *(buf + i-1);
         }
 }
 
@@ -214,7 +214,7 @@ void advance(Diffusion2D *D2D)
                 MPI_Send(data_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD);
         }
 
-
+        // MPI_Barrier(MPI_COMM_WORLD);
         // *************************************************************************
         //                              COMPUTATION PART
         // *************************************************************************
@@ -297,8 +297,8 @@ void compute_diagnostics(Diffusion2D *D2D, const int step, const double t)
 
         double heat = 0.0;
         for(int i = 1; i <= local_N_; ++i)
-                for(int j = 1; j <= N_; ++j)
-                heat += rho_[i*real_N_ + j] * dr_ * dr_;
+                for(int j = 1; j <= local_N_; ++j)
+                        heat += rho_[i*real_N_ + j] * dr_ * dr_;
 
         // TODO:MPI, reduce heat (sum)
         MPI_Reduce(rank_ == 0? MPI_IN_PLACE: &heat, &heat, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); 
@@ -347,7 +347,7 @@ int main(int argc, char* argv[])
 
         init(&system, D, L, N, T, dt, rank, procs); // init the 2d diffusion system
 
-        double t0 = MPI_Wtime();
+        double t0 = MPI_Wtime();        
         for (int step = 0; step < T; ++step)
         {
                 advance(&system);
