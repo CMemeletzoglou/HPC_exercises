@@ -188,21 +188,18 @@ void advance(Diffusion2D *D2D)
         if (upper_rank != MPI_PROC_NULL)
         {
                 MPI_Irecv(&rho_[0 * real_N_ + 1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD, &req[0]);
-
                 MPI_Isend(&rho_[1 * real_N_ + 1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD, &req[1]);
         }
         
         if(below_rank != MPI_PROC_NULL)
         {
                 MPI_Irecv(&rho_[(local_N_+1)*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD, &req[2]);
-
                 MPI_Isend(&rho_[local_N_*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD, &req[3]);
         }
 
         if (right_rank != MPI_PROC_NULL)
         {
                 MPI_Irecv(rcv_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD, &req[4]);
-                // scatter_column_data(D2D, rcv_buf, local_N_+1);
 
                 gather_column_data(D2D, data_buf, local_N_);
                 MPI_Isend(data_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD, &req[5]);
@@ -211,7 +208,6 @@ void advance(Diffusion2D *D2D)
         if (left_rank != MPI_PROC_NULL)
         {
                 MPI_Irecv(rcv_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD, &req[6]);
-                // scatter_column_data(D2D, rcv_buf, 0);
 
                 gather_column_data(D2D, data_buf, 1);
                 MPI_Isend(data_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD, &req[7]);
@@ -240,14 +236,13 @@ void advance(Diffusion2D *D2D)
                 }
         }
 
-        // wait here
+        // Wait in order to ensure data from neighbouring ranks, have arrived
         MPI_Waitall(8, req, status);
         if(status[4].MPI_SOURCE == right_rank)  
                 scatter_column_data(D2D, rcv_buf, local_N_+1);
         
         if(status[6].MPI_SOURCE == left_rank)  
                 scatter_column_data(D2D, rcv_buf, 0);
-        
 
         // update first and last column of each rank
         for (int i = 1; i <= local_N_; ++i)
