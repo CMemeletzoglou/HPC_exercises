@@ -24,7 +24,6 @@ typedef struct Diffusion2D_s
 void initialize_density(Diffusion2D *D2D)
 {
         int real_N_ = D2D->real_N_;
-        int N_ = D2D->N_;
         int local_N_ = D2D->local_N_;
         double *rho_ = D2D->rho_;
         double dr_ = D2D->dr_;
@@ -152,7 +151,6 @@ void scatter_column_data(Diffusion2D *D2D, double *buf, int col_index)
 
 void advance(Diffusion2D *D2D)
 {
-        int N_ = D2D->N_;
         int real_N_ = D2D->real_N_;
         int local_N_ = D2D->local_N_;
         double *rho_ = D2D->rho_;
@@ -173,7 +171,6 @@ void advance(Diffusion2D *D2D)
         int right_rank = ( ( ( (rank_ + 1) % sqrt_procs) ) == 0) ? MPI_PROC_NULL : rank_ + 1;
         int left_rank = ( ( ( rank_ % sqrt_procs) ) == 0 ) ? MPI_PROC_NULL : rank_ - 1;
 
-        // do we really need two buffers (?)
         double *data_buf = calloc(local_N_, sizeof(double));        
         double *rcv_buf = calloc(local_N_, sizeof(double));
 
@@ -220,7 +217,25 @@ void advance(Diffusion2D *D2D)
         // boundaries.
         for (int i = 2; i < local_N_; ++i)
         {
-                for (int j = 1; j <= local_N_; ++j)
+                for (int j = 2; j < local_N_; ++j)
+                {
+                        rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
+                                                fac_
+                                                *
+                                                (
+                                                + rho_[i*real_N_ + (j+1)]
+                                                + rho_[i*real_N_ + (j-1)]
+                                                + rho_[(i+1)*real_N_ + j]
+                                                + rho_[(i-1)*real_N_ + j]
+                                                - 4.*rho_[i*real_N_ + j]
+                                                );
+                }
+        }
+
+        // update first and last column of each rank
+        for (int i = 1; i <= local_N_; ++i)
+        {
+                for (int j = 1; j <= local_N_; j += local_N_- 1)
                 {
                         rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
                                                 fac_
@@ -267,7 +282,6 @@ void advance(Diffusion2D *D2D)
 
 void compute_diagnostics(Diffusion2D *D2D, const int step, const double t)
 {
-        int N_ = D2D->N_;
         int real_N_ = D2D->real_N_;
         int local_N_ = D2D->local_N_;
         double *rho_ = D2D->rho_;

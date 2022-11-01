@@ -32,6 +32,9 @@ diffusion2d_mpi: diffusion2d_mpi.c
 diffusion2d_mpi_square: diffusion2d_mpi_square.c
 	$(MPICC) $(CFLAGS) -o $@ $<
 
+diffusion2d_mpi_square_nb: diffusion2d_mpi_square_nb.c
+	$(MPICC) $(CFLAGS) -o $@ $<
+
 clean:
 	rm -f diffusion2d_serial diffusion2d_openmp diffusion2d_mpi_nb diffusion2d_mpi *.dat
 	rm -rf *.dSYM
