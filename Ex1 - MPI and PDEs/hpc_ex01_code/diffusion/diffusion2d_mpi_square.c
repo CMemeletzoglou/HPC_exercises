@@ -3,9 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
-#include <limits.h>
-
-#define NO_NEIGHBOUR INT_MAX
 
 typedef struct Diagnostics_s
 {
@@ -170,11 +167,11 @@ void advance(Diffusion2D *D2D)
         int sqrt_procs = (int)sqrt(procs_);
 
         // Compute the IDs for each rank's neighbouring ranks
-        int below_rank = ((rank_ + sqrt_procs) < procs_) ? rank_ + sqrt_procs : NO_NEIGHBOUR;
-        int upper_rank = ((rank_ - sqrt_procs) >= 0) ? rank_ - sqrt_procs : NO_NEIGHBOUR;
+        int below_rank = ((rank_ + sqrt_procs) < procs_) ? rank_ + sqrt_procs : MPI_PROC_NULL;
+        int upper_rank = ((rank_ - sqrt_procs) >= 0) ? rank_ - sqrt_procs : MPI_PROC_NULL;
 
-        int right_rank = ( ( ( (rank_ + 1) % sqrt_procs) ) == 0) ? NO_NEIGHBOUR : rank_ + 1;
-        int left_rank = ( ( ( rank_ % sqrt_procs) ) == 0 ) ? NO_NEIGHBOUR : rank_ - 1;
+        int right_rank = ( ( ( (rank_ + 1) % sqrt_procs) ) == 0) ? MPI_PROC_NULL : rank_ + 1;
+        int left_rank = ( ( ( rank_ % sqrt_procs) ) == 0 ) ? MPI_PROC_NULL : rank_ - 1;
 
         // do we really need two buffers (?)
         double *data_buf = calloc(local_N_, sizeof(double));        
@@ -185,19 +182,19 @@ void advance(Diffusion2D *D2D)
         // *************************************************************************
         
         // Exchange ALL necessary ghost cells with neighboring ranks.
-        if(upper_rank != NO_NEIGHBOUR)
+        if(upper_rank != MPI_PROC_NULL)
         {
                 MPI_Send(&rho_[1*real_N_+1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD);
                 MPI_Recv(&rho_[0*real_N_+1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD, &status[0]);
         }
 
-        if(below_rank != NO_NEIGHBOUR)
+        if(below_rank != MPI_PROC_NULL)
         {
                 MPI_Recv(&rho_[(local_N_+1)*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD, &status[1]);
                 MPI_Send(&rho_[local_N_*real_N_+1], local_N_, MPI_DOUBLE, below_rank, 100, MPI_COMM_WORLD);
         }
 
-        if (right_rank != NO_NEIGHBOUR)
+        if (right_rank != MPI_PROC_NULL)
         {
                 gather_column_data(D2D, data_buf, local_N_);
                 MPI_Send(data_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD);
@@ -206,7 +203,7 @@ void advance(Diffusion2D *D2D)
                 scatter_column_data(D2D, rcv_buf, local_N_+1);
         }
 
-        if (left_rank != NO_NEIGHBOUR)
+        if (left_rank != MPI_PROC_NULL)
         {
                 MPI_Recv(rcv_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD, &status[3]);
                 scatter_column_data(D2D, rcv_buf, 0);
