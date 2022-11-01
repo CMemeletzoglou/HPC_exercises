@@ -39,28 +39,20 @@ void initialize_density(Diffusion2D *D2D)
         /// Initialize rho(x, y, t=0).
         double bound = 0.25 * L_;
 
-        for (int i = 1; i <= local_N_; ++i) // row loop
+        for (int i = 1; i <= local_N_; ++i) // row traversal loop
         {
                 // global matrix row index
-                // gi = rank_ * (N_ / procs_) + i; // convert local index to global index
+                gi = floor((double)rank_ / sqrt(procs_)) * local_N_ + i; 
 
-                // only works for 4 processes.. TODO : for more processes??
-                // gi = floor((double)rank_ / 2) * local_N_ + i; // convert local index to global index
-                
-                gi = floor((double)rank_ / sqrt(procs_)) * local_N_ + i; // convert local index to global index
-
-                // for (int j =(i*real_N_)+1 ; j <= real_N_; ++j)
-                
                 for (int j = 1; j <= local_N_; ++j) // column traversal loop
                 {
-                        // gj = (rank_ % 2) * local_N_ + j; TODO : mod N procs
-                        gj = ( rank_ % (int)sqrt(procs_) ) * local_N_ + j;
+                        gj = ( rank_ % (int)sqrt(procs_) ) * local_N_ + j; // global matrix column index
 
-                        // if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((j - 1) * dr_ - 0.5 * L_) < bound)
+                        /* initialize each cell of the rho_ matrix, to 0 or 1, depending on its position
+                         * with respect to the area defined by the bound constant
+                         */
                         if (fabs((gi - 1) * dr_ - 0.5 * L_) < bound && fabs((gj - 1) * dr_ - 0.5 * L_) < bound)
                         {
-                                // πειραζω μια γραμμη του tile
-                                // καθε real_N_ διαδοχικα στοιχεια στον μονοδιαστατο πινακα ειναι 1 γραμμη
                                 rho_[i*real_N_ + j] = 1;
                         }
                         else
@@ -94,14 +86,8 @@ void init(Diffusion2D *D2D,
         // Stencil factor.
         D2D->fac_ = D2D->dt_ * D2D->D_ / (D2D->dr_ * D2D->dr_);
 
-        // Number of rows per process. Number of rows per square tile
-        // D2D->local_N_ = D2D->N_ / D2D->procs_; 
-        // D2D->local_N_ = 2 * (D2D->N_ / D2D->procs_); 
+        // Number of rows per process = Number of rows per square tile
         D2D->local_N_ = (int)sqrt(procs) * (D2D->N_ / D2D->procs_); 
-
-        // Small correction for the last process.
-        // if (D2D->rank_ == D2D->procs_ - 1)
-        //         D2D->local_N_ += D2D->N_ % D2D->procs_;
 
         // Actual dimension of a row (+2 for the ghost cells). (**num_cols +2**)
         D2D->real_N_ = D2D->local_N_ + 2;
@@ -109,8 +95,6 @@ void init(Diffusion2D *D2D,
         // Total number of cells inside each square tile
         D2D->Ntot_ = (D2D->local_N_ + 2) * (D2D->local_N_ + 2);
 
-        /* Στην ουσια δεσμευω χωρο για +2 εξτρα στηλες μητρωου, τις οποιες δεν χρησιμοποιω
-         */
         D2D->rho_ = (double *)calloc(D2D->Ntot_, sizeof(double));
         D2D->rho_tmp_ = (double *)calloc(D2D->Ntot_, sizeof(double));
         D2D->diag_ = (Diagnostics *)calloc(D2D->T_, sizeof(Diagnostics));
@@ -122,6 +106,25 @@ void init(Diffusion2D *D2D,
         initialize_density(D2D);
 }
 
+/* Helper function to gather data from a column vector, into the provided buffer (2nd argument).
+ * The column index is passed as the 3rd argument. We move to the first element of the column vector
+ * using the col_index, as an offset from the first element of the rho_ 2d matrix.
+ * 
+ * The 2d rho_ matrix is stored, as a linear array, therefore the rho_ + col_index, actually gives
+ * the element rho_[0][col_index].
+ * 
+ * Each rank (MPI Node) has a K x K square submatrix (with K = local_N_) of the global N x N rho_,
+ * but it has two extra columns and two extra rows, which are used as buffers for the data received
+ * from the neighbouring ranks.
+ * 
+ * Therefore, the actual data for each MPI Node, are contained in the (K-2) x (K-2) submatrix of the K x K matrix.
+ * gather_column_data needs to ignore the first and the last "superficial" rows. So, its for loop starts from row
+ * index = 1 to local_N, which is the rows containing the actual data.
+ *
+ * Each element of the column vector, has an offset of real_N_ from the previous element of the same column. 
+ * Thus, we need to make a jump of real_N_, in each new iteration of the for loop. Each element retrieved is stored
+ * into the buf buffer.
+ */
 void gather_column_data(Diffusion2D *D2D, double *buf, int col_index)
 {
         int local_N_ = D2D->local_N_;
@@ -134,6 +137,10 @@ void gather_column_data(Diffusion2D *D2D, double *buf, int col_index)
         }
 }
 
+/* Similarly, to gather_column_data, scatter_column_data operates on a column vector of the rho_ matrix.
+ *
+ * The function updates a column vector of the rho_ matrix with the data contained in the buf buffer (2nd argument).
+ */
 void scatter_column_data(Diffusion2D *D2D, double *buf, int col_index)
 {
         int local_N_ = D2D->local_N_;
@@ -157,13 +164,12 @@ void advance(Diffusion2D *D2D)
         int rank_ = D2D->rank_;
         int procs_ = D2D->procs_;
 
-        // MPI_Status status[2];
         MPI_Status status[4];
+
+        // we have sqrt(procs_) square tiles, i.e. sqrt(procs_) MPI nodes
         int sqrt_procs = (int)sqrt(procs_);
 
-        // int prev_rank = rank_ - 1;
-        // int next_rank = rank_ + 1;
-
+        // Compute the IDs for each rank's neighbouring ranks
         int below_rank = ((rank_ + sqrt_procs) < procs_) ? rank_ + sqrt_procs : NO_NEIGHBOUR;
         int upper_rank = ((rank_ - sqrt_procs) >= 0) ? rank_ - sqrt_procs : NO_NEIGHBOUR;
 
@@ -179,7 +185,6 @@ void advance(Diffusion2D *D2D)
         // *************************************************************************
         
         // Exchange ALL necessary ghost cells with neighboring ranks.
-        // post recv's first (?)
         if(upper_rank != NO_NEIGHBOUR)
         {
                 MPI_Send(&rho_[1*real_N_+1], local_N_, MPI_DOUBLE, upper_rank, 100, MPI_COMM_WORLD);
@@ -197,8 +202,6 @@ void advance(Diffusion2D *D2D)
                 gather_column_data(D2D, data_buf, local_N_);
                 MPI_Send(data_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD);
 
-                // λαμβανω δεδομενα στην μια εξτρα γραμμη που εχω δεσμευσει και στην ουσια 
-                // δεν πειραζω το πρωτο πρωτο στοιχειο και το τελευταιο τελευταιο στοιχειο
                 MPI_Recv(rcv_buf, local_N_, MPI_DOUBLE, right_rank, 100, MPI_COMM_WORLD, &status[2]);
                 scatter_column_data(D2D, rcv_buf, local_N_+1);
         }
@@ -212,7 +215,6 @@ void advance(Diffusion2D *D2D)
                 MPI_Send(data_buf, local_N_, MPI_DOUBLE, left_rank, 100, MPI_COMM_WORLD);
         }
 
-        // MPI_Barrier(MPI_COMM_WORLD);
         // *************************************************************************
         //                              COMPUTATION PART
         // *************************************************************************
@@ -221,8 +223,6 @@ void advance(Diffusion2D *D2D)
         // boundaries.
         for (int i = 2; i < local_N_; ++i)
         {
-                // for (int j = 1; j <= N_; ++j)
-                // TODO : Check loop bounds etc
                 for (int j = 1; j <= local_N_; ++j)
                 {
                         rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
@@ -237,25 +237,10 @@ void advance(Diffusion2D *D2D)
                                                 );
                 }
         }
-
-        // Note: This exercise is about synchronous communication, but the
-        // template code is formulated for asynchronous. In the latter case,
-        // when non-blocking send/recv is used, you would need to add an
-        // MPI_Wait here to make sure the incoming data arrives before
-        // evaluating the boundary cells (first and last row of the local
-        // matrix),
-        // Namely, network communication takes time and you always want to
-        // perform some work while waiting. In this code it means making the
-        // diffusion step for the inner part of the grid, which doesn't require
-        // any data from other nodes. Afterwards, when the data from
-        // neighboring nodes arrives, the first and last row are handled.
-        // As this is a synchronous-only exercise, feel free to merge the
-        // following for loops into the previous ones.
 
         // Update the first and the last rows of each rank.
         for (int i = 1; i <= local_N_; i += local_N_- 1)
         {
-                // for (int j = 1; j <= N_; ++j)
                 for (int j = 1; j <= local_N_; ++j)
                 {
                         rho_tmp_[i*real_N_ + j] = rho_[i*real_N_ + j] +
@@ -270,8 +255,6 @@ void advance(Diffusion2D *D2D)
                                                 );
                 }
         }
-
-
 
         // Swap rho_ with rho_tmp_. This is much more efficient,
         // because it does not copy element by element, just replaces storage
@@ -280,6 +263,7 @@ void advance(Diffusion2D *D2D)
         D2D->rho_tmp_ = D2D->rho_;
         D2D->rho_ = tmp_;
 
+        // free the dynamically allocated buffers
         free(data_buf);
         free(rcv_buf);
 }
@@ -298,9 +282,7 @@ void compute_diagnostics(Diffusion2D *D2D, const int step, const double t)
                 for(int j = 1; j <= local_N_; ++j)
                         heat += rho_[i*real_N_ + j] * dr_ * dr_;
 
-        // TODO:MPI, reduce heat (sum)
         MPI_Reduce(rank_ == 0? MPI_IN_PLACE: &heat, &heat, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); 
-
 
         if (rank_ == 0)
         {
@@ -331,7 +313,7 @@ int main(int argc, char* argv[])
         }
 
         int rank, procs;
-        MPI_Init(&argc, &argv); // init the MPI enviroment
+        MPI_Init(&argc, &argv); // initialize the MPI enviroment
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &procs);
 
@@ -343,7 +325,7 @@ int main(int argc, char* argv[])
 
         Diffusion2D system;
 
-        init(&system, D, L, N, T, dt, rank, procs); // init the 2d diffusion system
+        init(&system, D, L, N, T, dt, rank, procs); // initialize the 2d diffusion system
 
         double t0 = MPI_Wtime();        
         for (int step = 0; step < T; ++step)
