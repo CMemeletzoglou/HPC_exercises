@@ -326,19 +326,25 @@ void write_diagnostics(Diffusion2D *D2D, const char *filename)
 
 void write_density_mpi(Diffusion2D *D2D, char *filename)
 {
+        int ntot_ = D2D->Ntot_;
+        int rank_ = D2D->rank_;
+        double* rho_ = D2D->rho_;
+
+        // Open the file
         MPI_File f;
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &f);
         MPI_File_set_size(f, 0);
+
+        // Calculate the offset for each rank
         MPI_Offset base;
         MPI_File_get_position(f, &base);
+        base = base + rank_ * ntot_;
 
-        MPI_File_write(f, D2D->rho_, D2D->local_N_ * D2D->local_N_, MPI_DOUBLE, MPI_STATUS_IGNORE);
+        // Write the data
+        MPI_Status status;
+        MPI_File_write_at_all(f, base, rho_, ntot_, MPI_DOUBLE, &status);
 
-
-
-
-
-
+        // Close the file
         MPI_File_close(&f);
 }
 
