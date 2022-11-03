@@ -335,6 +335,18 @@ void collect_useful_data(Diffusion2D *D2D, double* buf)
                         buf[(i-1)*local_N_ + (j-1)] = rho_[i*real_N_ + j];
 }
 
+void construct_rho(Diffusion2D *D2D, double* buf)
+{
+        int local_N_ = D2D->local_N_;
+        int real_N_ = D2D->real_N_;
+        double* rho_ = D2D->rho_;
+
+        for (int i = 1; i <= real_N_; ++i)
+                for (int j = 1; j <= real_N_; ++j)
+                        rho_[i * real_N_ + j] = buf[(i - 1) * local_N_ + (j - 1)];
+}
+
+
 void write_density_mpi(Diffusion2D *D2D, char *filename)
 {
         int local_N_ = D2D->local_N_;
@@ -373,7 +385,35 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
 void read_density_mpi(Diffusion2D *D2D, char *filename)
 {
-        
+        int local_N_ = D2D->local_N_;
+        int rank_ = D2D->rank_;
+        int local_ntot_ = local_N_ * local_N_;
+        int real_ntot_ = D2D->real_N_ * D2D->real_N_;
+
+        // Buffer the useful data from rho_
+        int data_len = real_ntot_ * sizeof(double);
+        double* buf = (double*)malloc(data_len);
+
+        // Open the file (collective call)
+        MPI_File f;
+        MPI_File_delete(filename, MPI_INFO_NULL);
+
+        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
+
+        // Calculate the offset for each rank
+        MPI_Offset base;
+        MPI_File_get_position(f, &base);
+
+        MPI_Offset offset = rank_ * data_len;
+
+        // Write the data
+        MPI_Status status;
+        MPI_File_read_at_all(f, base + offset, buf, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
+
+        construct_rho(D2D, buf);
+        // Close the file - free buffer
+        MPI_File_close(&f);
+        free(buf);
 }
 
 int main(int argc, char* argv[])
