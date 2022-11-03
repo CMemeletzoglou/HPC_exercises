@@ -339,8 +339,8 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 {
         int local_N_ = D2D->local_N_;
         int rank_ = D2D->rank_;
-        double* rho_ = D2D->rho_;
         int local_ntot_ = local_N_ * local_N_;
+        int nprocs_ = D2D->procs_;
 
         // Buffer the useful data from rho_
         int data_len = local_ntot_ * sizeof(double);
@@ -349,8 +349,12 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
         // Open the file (collective call)
         MPI_File f;
-        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &f);
-        MPI_File_set_size(f, 0);
+        MPI_File_delete(filename, MPI_INFO_NULL);
+
+        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
+
+        MPI_Offset ntotal_bytes = data_len * nprocs_;
+        MPI_File_preallocate(f, ntotal_bytes);
 
         // Calculate the offset for each rank
         MPI_Offset base;
@@ -360,9 +364,8 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
         // Write the data
         MPI_Status status;
-        MPI_File_write_at_all(f, base + offset, rho_, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
-
-        printf("Rank = %d, inserted %d doubles, starting at: %d\n", rank_, local_ntot_, offset);
+        MPI_File_write_at_all(f, base + offset, buf, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
+        
         // Close the file - free buffer
         MPI_File_close(&f);
         free(buf);
@@ -382,7 +385,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 4*4;
+        const int  N  = 40*40;
         const int T = 1000;
         const double dt = 1e-9;
 
@@ -391,7 +394,8 @@ int main(int argc, char* argv[])
         init(&system, D, L, N, T, dt, rank, procs); // initialize the 2d diffusion system
 
         int restart_step = 0;
-        if (argc == 2) restart_step = atoi(argv[2]);
+        if (argc == 2)
+                restart_step = atoi(argv[2]);
 
         int break_at_step = -100;
         int first_step = 0;
@@ -409,13 +413,13 @@ int main(int argc, char* argv[])
         #ifndef _PERF_
                 compute_diagnostics(&system, step, dt * step);
         #endif
-                if (step == break_at_step) break;
+                if (step == break_at_step)
+                        break;
         }
         double t1 = MPI_Wtime();
 
         if (rank == 0)
                 printf("Timing: %d %lf\n", N, t1-t0);
-
 
         if (step == break_at_step)
                 write_density_mpi(&system, (char *)"density_mpi.dat.restart");
