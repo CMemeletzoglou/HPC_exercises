@@ -324,11 +324,28 @@ void write_diagnostics(Diffusion2D *D2D, const char *filename)
         fclose(out_file);
 }
 
+void collect_useful_data(Diffusion2D *D2D, double* buf)
+{
+        int local_N_ = D2D->local_N_;
+        int real_N_ = D2D->real_N_;
+        double* rho_ = D2D->rho_;
+
+        for (int i = 1; i <= local_N_; ++i)
+                for (int j = 1; j <= local_N_; ++j)
+                        buf[(i-1)*local_N_ + (j-1)] = rho_[i*real_N_ + j];
+}
+
 void write_density_mpi(Diffusion2D *D2D, char *filename)
 {
         int local_N_ = D2D->local_N_;
         int rank_ = D2D->rank_;
         double* rho_ = D2D->rho_;
+        int local_ntot_ = local_N_ * local_N_;
+
+        // Buffer the useful data from rho_
+        int data_len = local_ntot_ * sizeof(double);
+        double* buf = (double*)malloc(data_len);
+        collect_useful_data(D2D, buf);
 
         // Open the file (collective call)
         MPI_File f;
@@ -339,15 +356,16 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         MPI_Offset base;
         MPI_File_get_position(f, &base);
 
-        int data_len = (local_N_ * local_N_) * sizeof(double);
         MPI_Offset offset = rank_ * data_len;
 
         // Write the data
         MPI_Status status;
-        MPI_File_write_at_all(f, base + offset, rho_, local_N_ * local_N_, MPI_DOUBLE, &status); // blocking collective call
+        MPI_File_write_at_all(f, base + offset, rho_, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
 
-        // Close the file
+        printf("Rank = %d, inserted %d doubles, starting at: %d\n", rank_, local_ntot_, offset);
+        // Close the file - free buffer
         MPI_File_close(&f);
+        free(buf);
 }
 
 void read_density_mpi(Diffusion2D *D2D, char *filename)
@@ -364,7 +382,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 1024*4;
+        const int  N  = 4*4;
         const int T = 1000;
         const double dt = 1e-9;
 

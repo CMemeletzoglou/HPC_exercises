@@ -21,7 +21,7 @@ diffusion2d_mpi_nb_io: diffusion2d_mpi_nb_io.c
 	$(MPICC) $(CFLAGS) -o $@ $<
 
 diffusion2d_mpi_square_nb_io: diffusion2d_mpi_square_nb_io.c
-	$(MPICC) $(CFLAGS) -o $@ $<
+	$(MPICC) $(CFLAGS) -o $@ $< -lm
 
 clean:
 	rm -f diffusion2d_mpi_nb_io *.dat
