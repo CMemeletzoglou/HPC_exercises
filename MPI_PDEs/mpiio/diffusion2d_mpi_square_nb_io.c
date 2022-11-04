@@ -361,7 +361,7 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
         // Open the file (collective call)
         MPI_File f;
-        MPI_File_delete(filename, MPI_INFO_NULL);
+        // MPI_File_delete(filename, MPI_INFO_NULL); 
 
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
 
