@@ -324,6 +324,9 @@ void write_diagnostics(Diffusion2D *D2D, const char *filename)
         fclose(out_file);
 }
 
+/* Helper function to gather the rho_ submatrix controlled by each rank, into the
+ * buffer specified by the second argument. Called in write_density_mpi .
+ */
 void collect_useful_data(Diffusion2D *D2D, double* buf)
 {
         int local_N_ = D2D->local_N_;
@@ -335,17 +338,19 @@ void collect_useful_data(Diffusion2D *D2D, double* buf)
                         buf[(i-1)*local_N_ + (j-1)] = rho_[i*real_N_ + j];
 }
 
+/* Helper function to construct the rho_ submatrix controlled by each rank,
+ * using the data provided from buf.  Called in read_density_mpi .
+ */
 void construct_rho(Diffusion2D *D2D, double* buf)
 {
         int local_N_ = D2D->local_N_;
         int real_N_ = D2D->real_N_;
         double* rho_ = D2D->rho_;
 
-        for (int i = 1; i <= real_N_; ++i)
-                for (int j = 1; j <= real_N_; ++j)
+        for (int i = 1; i <= local_N_; ++i)
+                for (int j = 1; j <= local_N_; ++j)
                         rho_[i * real_N_ + j] = buf[(i - 1) * local_N_ + (j - 1)];
 }
-
 
 void write_density_mpi(Diffusion2D *D2D, char *filename)
 {
@@ -357,12 +362,10 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         // Buffer the useful data from rho_
         int data_len = local_ntot_ * sizeof(double);
         double* buf = (double*)malloc(data_len);
-        collect_useful_data(D2D, buf);
+        collect_useful_data(D2D, buf); // gather each rank's data
 
         // Open the file (collective call)
         MPI_File f;
-        // MPI_File_delete(filename, MPI_INFO_NULL); 
-
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
 
         MPI_Offset ntotal_bytes = data_len * nprocs_;
@@ -388,10 +391,9 @@ void read_density_mpi(Diffusion2D *D2D, char *filename)
         int local_N_ = D2D->local_N_;
         int rank_ = D2D->rank_;
         int local_ntot_ = local_N_ * local_N_;
-        int real_ntot_ = D2D->real_N_ * D2D->real_N_;
 
         // Buffer the useful data from rho_
-        int data_len = real_ntot_ * sizeof(double);
+        int data_len = local_ntot_ * sizeof(double);
         double* buf = (double*)malloc(data_len);
 
         // Open the file (collective call)
@@ -408,7 +410,7 @@ void read_density_mpi(Diffusion2D *D2D, char *filename)
         MPI_Status status;
         MPI_File_read_at_all(f, base + offset, buf, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
 
-        construct_rho(D2D, buf);
+        construct_rho(D2D, buf); // construct each rank's rho_
         // Close the file - free buffer
         MPI_File_close(&f);
         free(buf);
@@ -423,7 +425,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 40*40;
+        const int  N  = 1024;
         const int T = 1000;
         const double dt = 1e-9;
 
@@ -431,13 +433,19 @@ int main(int argc, char* argv[])
 
         init(&system, D, L, N, T, dt, rank, procs); // initialize the 2d diffusion system
 
-        int restart_step = 0;
-        if (argc == 2)
-                restart_step = atoi(argv[1]);
-
+        int restart_step = -1;
         int break_at_step = -100;
         int first_step = 0;
-        if (restart_step > 0)
+
+        if (argc == 3)
+        {
+                restart_step = atoi(argv[1]);
+                break_at_step = atoi(argv[2]);
+                if(break_at_step > T)
+                        break_at_step = T;
+        }
+
+        if (restart_step >= 0) // >=0 to be able to restart from the very first step
         {
                 read_density_mpi(&system, (char *)"density_mpi.dat.restart");
                 first_step = restart_step;

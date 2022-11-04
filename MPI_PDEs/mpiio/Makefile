@@ -15,7 +15,7 @@ endif
 CFLAGS+=-Wall -lm -g -O2
 CFLAGS_THREADS=$(CFLAGS) -fopenmp
 
-all: diffusion2d_mpi_nb_io
+all: diffusion2d_mpi_nb_io diffusion2d_mpi_square_nb_io 
 
 diffusion2d_mpi_nb_io: diffusion2d_mpi_nb_io.c
 	$(MPICC) $(CFLAGS) -o $@ $<
