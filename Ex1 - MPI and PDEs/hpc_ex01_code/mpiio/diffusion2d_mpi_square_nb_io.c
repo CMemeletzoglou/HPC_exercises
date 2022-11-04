@@ -396,8 +396,6 @@ void read_density_mpi(Diffusion2D *D2D, char *filename)
 
         // Open the file (collective call)
         MPI_File f;
-        MPI_File_delete(filename, MPI_INFO_NULL);
-
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
 
         // Calculate the offset for each rank
@@ -435,7 +433,7 @@ int main(int argc, char* argv[])
 
         int restart_step = 0;
         if (argc == 2)
-                restart_step = atoi(argv[2]);
+                restart_step = atoi(argv[1]);
 
         int break_at_step = -100;
         int first_step = 0;
