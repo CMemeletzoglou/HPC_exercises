@@ -15,14 +15,16 @@ endif
 CFLAGS+=-Wall -lm -g -O2
 CFLAGS_THREADS=$(CFLAGS) -fopenmp
 
-all: diffusion2d_mpi_nb_io diffusion2d_mpi_square_nb_io 
+all: diffusion2d_mpi_nb_io diffusion2d_mpi_square_nb_io diffusion2d_mpi_square_nb_io_row
 
 diffusion2d_mpi_nb_io: diffusion2d_mpi_nb_io.c
 	$(MPICC) $(CFLAGS) -o $@ $<
 
 diffusion2d_mpi_square_nb_io: diffusion2d_mpi_square_nb_io.c
-	$(MPICC) $(CFLAGS) -o $@ $< -lm
+	$(MPICC) $(CFLAGS) -o $@ $< 
 
+diffusion2d_mpi_square_nb_io_row: diffusion2d_mpi_square_nb_io_row.c
+	$(MPICC) $(CFLAGS) -o $@ $< 
 clean:
 	rm -f diffusion2d_mpi_nb_io *.dat
 	rm -f diffusion2d_mpi_square_nb_io *.dat
