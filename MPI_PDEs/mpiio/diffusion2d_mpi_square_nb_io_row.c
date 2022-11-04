@@ -382,9 +382,9 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         int block_row_offset = floor((double)rank_ / sqrt_procs) * block_row_size;
 
         // skip one line, for each of the previous ranks of the same block row
-        int inrow_offset = (rank_ % sqrt_procs) * (local_N_ * sizeof(double));
+        int inrow_offset = (rank_ % sqrt_procs) * rank_row_size;
 
-        double *line_buf = (double *)malloc(rank_row_size);
+        double *line_buf = (double *)calloc(local_N_, sizeof(double));
 
         MPI_Status status;
         // Open the file (collective call)
@@ -404,13 +404,21 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         // Write the data
         for (int i = 1; i <= local_N_; i++)
         {
-                // Extract the line you currently want to write to the file
+                // Extract the current line to be written
+                printf("Rank : %d, New rank offset for line %d = %lld\n", rank_,i, rank_offset);
                 get_rho_line(D2D, line_buf, i);
+                // if(rank_ == 0)
+                //         printf("**here1\n");
 
                 // Write the line
-                MPI_File_write_at_all(f, base + rank_offset, line_buf, rank_row_size, MPI_DOUBLE, &status); // blocking collective call
+                MPI_File_write_at(f, base + rank_offset, line_buf, rank_row_size, MPI_DOUBLE, &status); // blocking collective call
+
+                // if(rank_ == 0)
+                //         printf("--here2\n");
 
                 rank_offset += D2D->N_ * sizeof(double);
+
+                // printf("Rank : %d, New rank offset after line %d = %lld\n", rank_,i, rank_offset);
         }
 
         // Close the file - free buffer
@@ -483,7 +491,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 1024;
+        const int  N  = 1*16;
         const int T = 1000;
         const double dt = 1e-9;
 
