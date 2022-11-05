@@ -324,34 +324,6 @@ void write_diagnostics(Diffusion2D *D2D, const char *filename)
         fclose(out_file);
 }
 
-/* Helper function to gather the rho_ submatrix controlled by each rank, into the
- * buffer specified by the second argument. Called in write_density_mpi .
- */
-// void collect_useful_data(Diffusion2D *D2D, double* buf)
-// {
-//         int local_N_ = D2D->local_N_;
-//         int real_N_ = D2D->real_N_;
-//         double* rho_ = D2D->rho_;
-
-//         for (int i = 1; i <= local_N_; ++i)
-//                 for (int j = 1; j <= local_N_; ++j)
-//                         buf[(i-1)*local_N_ + (j-1)] = rho_[i*real_N_ + j];
-// }
-
-/* Helper function to construct the rho_ submatrix controlled by each rank,
- * using the data provided from buf.  Called in read_density_mpi .
- */
-void construct_rho(Diffusion2D *D2D, double* buf)
-{
-        int local_N_ = D2D->local_N_;
-        int real_N_ = D2D->real_N_;
-        double* rho_ = D2D->rho_;
-
-        for (int i = 1; i <= local_N_; ++i)
-                for (int j = 1; j <= local_N_; ++j)
-                        rho_[i * real_N_ + j] = buf[(i - 1) * local_N_ + (j - 1)];
-}
-
 void get_rho_line(Diffusion2D* D2D, double* line_buf, int line)
 {
         int local_N_ = D2D->local_N_;
@@ -360,6 +332,16 @@ void get_rho_line(Diffusion2D* D2D, double* line_buf, int line)
     
         for (int j = 1; j <= local_N_; j++)
                 line_buf[j - 1] = rho_[line * real_N_ + j];
+}
+
+void construct_rho_line(Diffusion2D* D2D, double* line_buf, int line)
+{
+        int local_N_ = D2D->local_N_;
+        int real_N_ = D2D->real_N_;
+        double* rho_ = D2D->rho_;
+    
+        for (int j = 1; j <= local_N_; j++)
+                rho_[line * real_N_ + j] = line_buf[j - 1];
 }
 
 void write_density_mpi(Diffusion2D *D2D, char *filename)
@@ -405,7 +387,6 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         for (int i = 1; i <= local_N_; i++)
         {
                 // Extract the current line to be written
-                printf("Rank : %d, New rank offset for line %d = %lld\n", rank_,i, rank_offset);
                 get_rho_line(D2D, line_buf, i);
 
                 // Write the line
@@ -439,17 +420,14 @@ void read_density_mpi(Diffusion2D *D2D, char *filename)
         int block_row_offset = floor((double)rank_ / sqrt_procs) * block_row_size;
 
         // skip one line, for each of the previous ranks of the same block row
-        int inrow_offset = (rank_ % sqrt_procs) * (local_N_ * sizeof(double));
+        int inrow_offset = (rank_ % sqrt_procs) * rank_row_size;
 
-        double *line_buf = (double *)malloc(rank_row_size);
+        double *line_buf = (double *)calloc(local_N_, sizeof(double));
 
         MPI_Status status;
         // Open the file (collective call)
         MPI_File f;
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
-
-        MPI_Offset ntotal_bytes = data_len * nprocs_;
-        MPI_File_preallocate(f, ntotal_bytes);
 
         // Calculate the initial offset for each rank
         MPI_Offset base;
@@ -461,18 +439,18 @@ void read_density_mpi(Diffusion2D *D2D, char *filename)
         // Write the data
         for (int i = 1; i <= local_N_; i++)
         {
-                // Extract the line you currently want to write to the file
-                get_rho_line(D2D, line_buf, i);
-
-                // Write the line
-                MPI_File_write_at_all(f, base + rank_offset, line_buf, rank_row_size, MPI_DOUBLE, &status); // blocking collective call
+                // Read the current line
+                MPI_File_read_at_all(f, base + rank_offset, line_buf, local_N_, MPI_DOUBLE, &status); // blocking collective call
+                
+                // construct the current rho_ line
+                construct_rho_line(D2D, line_buf, i);
 
                 rank_offset += D2D->N_ * sizeof(double);
         }
 
         // Close the file - free buffer
         MPI_File_close(&f);
-        free(line_buf);    
+        free(line_buf);
 }
 
 int main(int argc, char* argv[])
