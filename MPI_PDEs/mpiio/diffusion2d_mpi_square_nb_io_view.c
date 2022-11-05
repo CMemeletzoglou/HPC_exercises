@@ -367,7 +367,7 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         double* buf = (double*)malloc(data_len);
         collect_useful_data(D2D, buf); // gather each rank's data
 
-        /* CALCULATE INITIAL OFFESET FOR EACH PROCESS */
+        /* CALCULATE INITIAL OFFSET FOR EACH PROCESS */
 
         // Each row of the global rho_ matrix, contains sqrt(nprocs_) ranks.
         // Each rank writes data_len bytes (local_ntot_ doubles).
@@ -388,7 +388,6 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
         MPI_Offset ntotal_bytes = data_len * nprocs_;
         MPI_File_preallocate(f, ntotal_bytes);
-        // MPI_File_set_size(f, 0);
 
         // Calculate the initial offset for each rank
         MPI_Offset base;
@@ -417,7 +416,61 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
 
 void read_density_mpi(Diffusion2D *D2D, char *filename)
 {
-        printf("read_density_mpi is not yet implemented!\n");
+        int local_N_ = D2D->local_N_;
+        int rank_ = D2D->rank_;
+        int local_ntot_ = local_N_ * local_N_;
+        int nprocs_ = D2D->procs_;
+
+        int sqrt_procs = (int)sqrt(nprocs_);
+        int data_len = local_ntot_ * sizeof(double);
+
+        /* ALLOCATE BUFFER TO SAVE THE READ DATA INTO  */
+        double* buf = (double*)malloc(data_len);
+
+        /* CALCULATE INITIAL OFFSET FOR EACH PROCESS */
+
+        // Each row of the global rho_ matrix, contains sqrt(nprocs_) ranks.
+        // Each rank writes data_len bytes (local_ntot_ doubles).
+        int block_row_size = data_len * sqrt_procs;
+        int rank_row_size = local_N_ * sizeof(double);
+
+        // find the block row index of each rank and then "skip" the blocks written by the previous ranks
+        int block_row_offset = floor((double)rank_ / sqrt_procs) * block_row_size;
+
+        // skip one line, for each of the previous ranks of the same block row
+        int inrow_offset = (rank_ % sqrt_procs) * rank_row_size;
+
+        /* SET THE MPI VIEW and USE THAT VIEW FOR MPI_File_read_all */
+
+        // Open the file (collective call)
+        MPI_File f;
+        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
+
+        // Calculate the initial offset for each rank
+        MPI_Offset base;
+        MPI_File_get_position(f, &base);
+
+        // initial rank offset
+        MPI_Offset rank_offset = block_row_offset + inrow_offset;
+
+        // Create the view
+        MPI_Datatype VEC_DOUBLE_WITH_HOLES;
+        MPI_Type_vector(local_N_, local_N_, D2D->N_, MPI_DOUBLE, &VEC_DOUBLE_WITH_HOLES);
+        MPI_Type_commit(&VEC_DOUBLE_WITH_HOLES);
+        MPI_File_set_view(f, rank_offset, MPI_DOUBLE, VEC_DOUBLE_WITH_HOLES, "native", MPI_INFO_NULL);
+
+        // Read the data - MIND THE VIEW!!!
+        MPI_Status status;
+        MPI_File_read_all(f, buf, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
+        
+        // Copy the data into rho_
+        construct_rho(D2D, buf);
+
+        /* FREE */
+        // Close the file - free buffer
+        MPI_File_close(&f);
+        free(buf);
+        MPI_Type_free(&VEC_DOUBLE_WITH_HOLES);
 }
 
 int main(int argc, char* argv[])
