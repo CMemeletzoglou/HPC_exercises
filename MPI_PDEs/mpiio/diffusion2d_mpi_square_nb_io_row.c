@@ -474,7 +474,11 @@ int main(int argc, char* argv[])
         int break_at_step = -100;
         int first_step = 0;
 
-        if (argc == 3)
+        if (argc == 2)
+        {
+                restart_step = atoi(argv[1]);
+        }
+        else if (argc == 3)
         {
                 restart_step = atoi(argv[1]);
                 break_at_step = atoi(argv[2]);
