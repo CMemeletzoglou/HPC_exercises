@@ -85,7 +85,7 @@ void init(Diffusion2D *D2D,
         D2D->fac_ = D2D->dt_ * D2D->D_ / (D2D->dr_ * D2D->dr_);
 
         // Number of rows per process = Number of rows per square tile
-        D2D->local_N_ = (int)sqrt(procs) * (D2D->N_ / D2D->procs_); 
+        D2D->local_N_ = D2D->N_ / (int)sqrt(procs);
 
         // Actual dimension of a row (+2 for the ghost cells). (**num_cols +2**)
         D2D->real_N_ = D2D->local_N_ + 2;
