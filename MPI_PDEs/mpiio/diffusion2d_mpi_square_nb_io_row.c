@@ -407,18 +407,11 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
                 // Extract the current line to be written
                 printf("Rank : %d, New rank offset for line %d = %lld\n", rank_,i, rank_offset);
                 get_rho_line(D2D, line_buf, i);
-                // if(rank_ == 0)
-                //         printf("**here1\n");
 
                 // Write the line
-                MPI_File_write_at(f, base + rank_offset, line_buf, rank_row_size, MPI_DOUBLE, &status); // blocking collective call
-
-                // if(rank_ == 0)
-                //         printf("--here2\n");
+                MPI_File_write_at_all(f, base + rank_offset, line_buf, local_N_, MPI_DOUBLE, &status); // blocking collective call
 
                 rank_offset += D2D->N_ * sizeof(double);
-
-                // printf("Rank : %d, New rank offset after line %d = %lld\n", rank_,i, rank_offset);
         }
 
         // Close the file - free buffer
