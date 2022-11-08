@@ -462,7 +462,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 1*16;
+        const int  N  = 1024;
         const int T = 1000;
         const double dt = 1e-9;
 

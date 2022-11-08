@@ -405,7 +405,6 @@ void write_density_mpi(Diffusion2D *D2D, char *filename)
         // Write the data - MIND THE VIEW!!!
         MPI_Status status;
         MPI_File_write_all(f, buf, local_ntot_, MPI_DOUBLE, &status); // blocking collective call
-        // printf("Rank : %d, New rank offset for line %d = %lld and wrote %ld bytes\n", rank_, 0, rank_offset, status._ucount);
         
         /* FREE */
         // Close the file - free buffer
@@ -482,7 +481,7 @@ int main(int argc, char* argv[])
 
         const double D  = 1;
         const double L  = 1;
-        const int  N  = 1*16;
+        const int  N  = 1024;
         const int T = 1000;
         const double dt = 1e-9;
 
