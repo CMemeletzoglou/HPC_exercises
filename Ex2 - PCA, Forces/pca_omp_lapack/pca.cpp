@@ -138,11 +138,12 @@ int main(int argc, char **argv)
         double *A = new (std::nothrow) double[n*m];
         assert(A != NULL);
 
-        for (int i = 0; i < n; i++) // column traversal
+        // get each column vector of I and store it as a row vector of A
+        for (int i = 0; i < n; i++) 
         {
-                for (int j = 0; j < m; j++) // row traversal
+                for (int j = 0; j < m; j++)
                 {
-                        A[i*m + j] = I[j*n+i];
+                        A[i*m + j] = I[j*n+i]; 
                 }
         }
         delete[] I;
@@ -175,7 +176,7 @@ int main(int argc, char **argv)
 
         for (int i = 0; i < n; i++)
         {
-                // TODO: compute mean and standard deviation of features of A
+                // TODO: compute mean and standard deviation of features of A (**DONE**)
 
                 double col_mean = 0.0;
                 double col_sum = 0.0;
@@ -185,140 +186,145 @@ int main(int argc, char **argv)
                 // mean calculation
                 for (int j = 0; j < m; j++)
                 {
-                        col_mean += A[i * n + j];
+                        col_mean += A[i*n+j];
                 }
                 col_mean = col_mean / m;
                 AMean[i] = col_mean; // TODO(?): maybe we don't need the col_mean intermediate variable
 
                 // standard deviation calculation
-
                 for (int j = 0; j < m; j++)
                 {
-                        col_sum += pow((A[i * n + j] - col_mean), 2);
+                        col_sum += pow((A[i*n+j] - col_mean), 2);
                 }
-
                 AStd[i] = sqrt(col_sum / (m - 1));
 
                 std::cout << "index : " << i << " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
         }
         
+        t_elapsed += omp_get_wtime();
+        std::cout << "MEAN/STD TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "MEAN/STD TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO: 2.
+        t_elapsed = -omp_get_wtime();
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 2.
-        // t_elapsed = -omp_get_wtime();
+        for (int i = 0; i < n; i++)
+        {
+                for (int j = 0; j < m; j++)
+                {
+                        // TODO: normalize data here (**DONE**)
+                        /* Data Normalization : First substract from each column of I
+                         * (i.e from each row of A) its sample mean, and then divide by its
+                         * standard deviation.
+                         *
+                         * AMean[i] = the mean of the i-th row of A (the i-th column of I)
+                         * AStd[i] = the std dev of the i-th row of A (the i-th column of I)
+                         */
+                        A[i*n+j] = (A[i*n+j] - AMean[i]) / AStd[i];
+                }
+        }
+        t_elapsed += omp_get_wtime();
+        std::cout << "NORMAL TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
-        // for (int i = 0; i < n; i++)
-        // {
-        //         for (int j = 0; j < m; j++)
-        //         {
-        //                 // TODO: normalize data here
-        //         }
-        // }
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "NORMAL. TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO: 3.
+        t_elapsed = -omp_get_wtime();
+        double *C = new (std::nothrow) double[n*n];
+        assert(C!=NULL);
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 3.
-        // t_elapsed = -omp_get_wtime();
-        // double *C = new (std::nothrow) double[n*n];
-        // assert(C!=NULL);
+        // TODO: Compute covariance matrix here
 
-        // // TODO: Compute covariance matrix here
+        t_elapsed += omp_get_wtime();
+        std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO 4. LAPACK
+        t_elapsed = -omp_get_wtime();
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO 4. LAPACK
-        // t_elapsed = -omp_get_wtime();
+        // see also for the interface to dsyev_():
+        // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
+        char jobz = '?'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
+        char uplo = '?'; // TODO: how did you compute the (symmetric) covariance matrix?
+        int info, lwork;
 
-        // // see also for the interface to dsyev_():
-        // // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
-        // char jobz = '?'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        // char uplo = '?'; // TODO: how did you compute the (symmetric) covariance matrix?
-        // int info, lwork;
+        double *W = new (std::nothrow) double[n]; // eigenvalues
+        assert(W != NULL);
 
-        // double *W = new (std::nothrow) double[n]; // eigenvalues
-        // assert(W != NULL);
+        double *work = new (std::nothrow) double[2];
+        assert(work != NULL);
 
-        // double *work = new (std::nothrow) double[2];
-        // assert(work != NULL);
+        // first call to dsyev_() with lwork = -1 to determine the optimal
+        // workspace (cheap call)
+        lwork = -1;
 
-        // // first call to dsyev_() with lwork = -1 to determine the optimal
-        // // workspace (cheap call)
-        // lwork = -1;
+        // TODO: call dsyev here
 
-        // // TODO: call dsyev here
+        lwork = (int)work[0];
+        delete[] work;
 
-        // lwork = (int)work[0];
-        // delete[] work;
+        // allocate optimal workspace
+        work = new (std::nothrow) double[lwork];
+        assert(work != NULL);
 
-        // // allocate optimal workspace
-        // work = new (std::nothrow) double[lwork];
-        // assert(work != NULL);
+        // second call to dsyev_(), eigenvalues and eigenvectors are computed here
+        // TODO: call dsyev here
 
-        // // second call to dsyev_(), eigenvalues and eigenvectors are computed here
-        // // TODO: call dsyev here
+        t_elapsed += omp_get_wtime();
+        std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO: 5.
+        t_elapsed = -omp_get_wtime();
+        double *PCReduced = new (std::nothrow) double[m*npc];
+        assert(PCReduced != NULL);
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 5.
-        // t_elapsed = -omp_get_wtime();
-        // double *PCReduced = new (std::nothrow) double[m*npc];
-        // assert(PCReduced != NULL);
+        for (int i = 0; i < m; i++)
+        {
+                for (int j = 0; j < npc; j++)
+                {
+                        // TODO: compute the principal components
+                }
+        }
 
-        // for (int i = 0; i < m; i++)
-        // {
-        //         for (int j = 0; j < npc; j++)
-        //         {
-        //                 // TODO: compute the principal components
-        //         }
-        // }
+        // TODO: Report the compression ratio
 
-        // // TODO: Report the compression ratio
+        t_elapsed += omp_get_wtime();
+        std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        double end_t = omp_get_wtime();
+        std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
 
-        // double end_t = omp_get_wtime();
-        // std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO: 6
+        double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
+        assert(Z != NULL);
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 6
-        // double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
-        // assert(Z != NULL);
+        for (int i = 0; i < m; i++)
+        {
+                for (int j = 0; j < n; j++)
+                {
+                        // TODO: Reconstruct image here.  Don't forget to denormalize.  The
+                        // dimension of the reconstructed image is m x n (rows x columns).
+                        // Z[i*n + j] = ...
+                }
+        }
 
-        // for (int i = 0; i < m; i++)
-        // {
-        //         for (int j = 0; j < n; j++)
-        //         {
-        //                 // TODO: Reconstruct image here.  Don't forget to denormalize.  The
-        //                 // dimension of the reconstructed image is m x n (rows x columns).
-        //                 // Z[i*n + j] = ...
-        //         }
-        // }
+        // Write the reconstructed image in ascii format.  You can view the image
+        // in Matlab with the show_image.m script.
+        write_ascii(out_filename, Z, m, n);
+        ///////////////////////////////////////////////////////////////////////////
 
-        // // Write the reconstructed image in ascii format.  You can view the image
-        // // in Matlab with the show_image.m script.
-        // write_ascii(out_filename, Z, m, n);
-        // ///////////////////////////////////////////////////////////////////////////
-
-        // // cleanup
-        // delete[] work;
-        // delete[] W;
-        // delete[] C;
-        // delete[] Z;
-        // delete[] PCReduced;
+        // cleanup
+        delete[] work;
+        delete[] W;
+        delete[] C;
+        delete[] Z;
+        delete[] PCReduced;
         delete[] A;
         delete[] AMean;
         delete[] AStd;
