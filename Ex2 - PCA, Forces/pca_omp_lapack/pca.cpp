@@ -68,6 +68,21 @@ void write_ascii(const char* const filename, const double* const data, const int
 }
 ///////////////////////////////////////////////////////////////////////////////
 
+/* compute the covariance of the two row-vectors corresponding to lines i and j
+ * of matrix A
+ */
+double cov(double *A, int i, int j, int n, int m, double *AMean)
+{
+        double tmp = 0.0;
+        for (int k = 0; k < m; k++)
+        {
+                // compute cov(A(:,i), A(:,j))
+                tmp += (A[i * m + k] - AMean[i]) * (A[j * m + k] - AMean[j]);
+        }
+        return (tmp / m-1); //cov calculated (C(i,j) element)
+}
+
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 // elvis.bin.gz:   469x700
@@ -182,25 +197,26 @@ int main(int argc, char **argv)
                 double col_sum = 0.0;
 
                 // each **row** of A is a **column** of the image .. A is n x m
+                // the original image matrix I is m x n
 
                 // mean calculation
                 for (int j = 0; j < m; j++)
                 {
-                        col_mean += A[i*n+j];
+                        col_mean += A[i*m+j];
                 }
-                col_mean = col_mean / m; // m or n?
+                col_mean = col_mean / m; 
                 AMean[i] = col_mean; // TODO(?): maybe we don't need the col_mean intermediate variable
 
                 // standard deviation calculation
                 for (int j = 0; j < m; j++)
                 {
-                        col_sum += pow((A[i*n+j] - col_mean), 2);
+                        col_sum += pow((A[i*m+j] - col_mean), 2);
                 }
                 AStd[i] = sqrt(col_sum / (m - 1));
 
-                // std::cout << "index : " << i << " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
+                // std::cout << "index : " << i S<< " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
         }
-        
+
         t_elapsed += omp_get_wtime();
         std::cout << "MEAN/STD TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
@@ -221,9 +237,10 @@ int main(int argc, char **argv)
                          * AMean[i] = the mean of the i-th row of A (the i-th column of I)
                          * AStd[i] = the std dev of the i-th row of A (the i-th column of I)
                          */
-                        A[i*n+j] = (A[i*n+j] - AMean[i]) / AStd[i];
+                        A[i*m+j] = (A[i*m+j] - AMean[i]) / AStd[i];
                 }
         }
+
         t_elapsed += omp_get_wtime();
         std::cout << "NORMAL TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
@@ -247,34 +264,29 @@ int main(int argc, char **argv)
          */
 
         // Triple nested for? outer loop for A-row selection and then two loops to compute the covariance 
-        // with each other row of A
+        // with each other row of A (A is n x m)
         for (int i = 0; i < n; i++) // pick first row of A (col of I)
         {
                 for (int j = 0; j < n; j++) // pick second row of A (col of I)
                 {
                         // if(i != j)
                         // {
-                                double tmp = 0.0;
-                                for (int k = 0; k < m; k++)
-                                {
-                                        // compute cov(A(:,i), A(:,j))
-                                        tmp += (A[i * n + k] - AMean[i]) * (A[j * n + k] - AMean[j]);
-                                }
-                                tmp = tmp / (m - 1); //cov calculated (C(i,j) element)
-
-                                C[i * n + j] = tmp;
+                                C[i*n+j] = cov(A, i, j, n, m, AMean);
                         // }
                 }
         }
 
-        for (int i = 0; i < n; i++)
+        std::cout << "Finished calculating covariance matrix" << std::endl;
+
+        for (int i = 0; i < 5; i++)
         {
-                for (int j = 0; j < n; j++)
+                for (int j = 0; j < 5; j++)
                 {
-                        std::cout << "element[ : " << i << ", " << j << "] = " << C[i * n + j] << std::endl;
+                        std::cout << "element[ " << i << ", " << j << "] = " << C[i * n + j] << std::endl;
                         std::cout << std::endl;
                 }
         }
+        std::cout << "Finished calculating covariance matrix 22" << std::endl;
 
         // t_elapsed += omp_get_wtime();
         // std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
@@ -362,7 +374,7 @@ int main(int argc, char **argv)
         // // cleanup
         // delete[] work;
         // delete[] W;
-        // delete[] C;
+        delete[] C;
         // delete[] Z;
         // delete[] PCReduced;
         delete[] A;
