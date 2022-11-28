@@ -147,15 +147,15 @@ int main(int argc, char **argv)
                 }
         }
         delete[] I;
-        
+
         ///////////////////////////////////////////////////////////////////////////
         // The compressed image file is stored in a **row-wise** manner
         ///////////////////////////////////////////////////////////////////////////
 
         ///////////////////////////////////////////////////////////////////////////
         // TODO: Implement your PCA algorithm here
-        // 1. Compute mean and standard deviation of your image features (= image columns)
-        // 2. Normalize the data
+        // 1. Compute mean and standard deviation of your image features (= image columns) (**DONE**)
+        // 2. Normalize the data (**DONE**)
         // 3. Build the covariance matrix
         // 4. Compute the eigenvalues and eigenvectors of the covariance matrix.
         //    Use LAPACK here.
@@ -188,7 +188,7 @@ int main(int argc, char **argv)
                 {
                         col_mean += A[i*n+j];
                 }
-                col_mean = col_mean / m;
+                col_mean = col_mean / m; // m or n?
                 AMean[i] = col_mean; // TODO(?): maybe we don't need the col_mean intermediate variable
 
                 // standard deviation calculation
@@ -198,7 +198,7 @@ int main(int argc, char **argv)
                 }
                 AStd[i] = sqrt(col_sum / (m - 1));
 
-                std::cout << "index : " << i << " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
+                // std::cout << "index : " << i << " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
         }
         
         t_elapsed += omp_get_wtime();
@@ -231,100 +231,140 @@ int main(int argc, char **argv)
         ///////////////////////////////////////////////////////////////////////////
         // TODO: 3.
         t_elapsed = -omp_get_wtime();
-        double *C = new (std::nothrow) double[n*n];
-        assert(C!=NULL);
+        double *C = new (std::nothrow) double[n*n]; // covariance matrix
+        assert(C != NULL);
 
         // TODO: Compute covariance matrix here
 
-        t_elapsed += omp_get_wtime();
-        std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /* For a m x n matrix, where each of the m rows is an observation and each of the 
+         * n columns is a Random variable vector, the Covariance matrix can be calculated as :
+         *
+         * C(i,j) = cov(I(:,i), I(:,j)), where I is the original image array
+         * 
+         * Therefore, each element of the Covariance matrix is the pairwise covariance of 
+         * each column vector combination.
+         * For the array A, we have : C(i,j) = cov(A(i,:), A(j,:))
+         */
 
-        ///////////////////////////////////////////////////////////////////////////
-        // TODO 4. LAPACK
-        t_elapsed = -omp_get_wtime();
-
-        // see also for the interface to dsyev_():
-        // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
-        char jobz = '?'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        char uplo = '?'; // TODO: how did you compute the (symmetric) covariance matrix?
-        int info, lwork;
-
-        double *W = new (std::nothrow) double[n]; // eigenvalues
-        assert(W != NULL);
-
-        double *work = new (std::nothrow) double[2];
-        assert(work != NULL);
-
-        // first call to dsyev_() with lwork = -1 to determine the optimal
-        // workspace (cheap call)
-        lwork = -1;
-
-        // TODO: call dsyev here
-
-        lwork = (int)work[0];
-        delete[] work;
-
-        // allocate optimal workspace
-        work = new (std::nothrow) double[lwork];
-        assert(work != NULL);
-
-        // second call to dsyev_(), eigenvalues and eigenvectors are computed here
-        // TODO: call dsyev here
-
-        t_elapsed += omp_get_wtime();
-        std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
-
-        ///////////////////////////////////////////////////////////////////////////
-        // TODO: 5.
-        t_elapsed = -omp_get_wtime();
-        double *PCReduced = new (std::nothrow) double[m*npc];
-        assert(PCReduced != NULL);
-
-        for (int i = 0; i < m; i++)
+        // Triple nested for? outer loop for A-row selection and then two loops to compute the covariance 
+        // with each other row of A
+        for (int i = 0; i < n; i++) // pick first row of A (col of I)
         {
-                for (int j = 0; j < npc; j++)
+                for (int j = 0; j < n; j++) // pick second row of A (col of I)
                 {
-                        // TODO: compute the principal components
+                        // if(i != j)
+                        // {
+                                double tmp = 0.0;
+                                for (int k = 0; k < m; k++)
+                                {
+                                        // compute cov(A(:,i), A(:,j))
+                                        tmp += (A[i * n + k] - AMean[i]) * (A[j * n + k] - AMean[j]);
+                                }
+                                tmp = tmp / (m - 1); //cov calculated (C(i,j) element)
+
+                                C[i * n + j] = tmp;
+                        // }
                 }
         }
 
-        // TODO: Report the compression ratio
-
-        t_elapsed += omp_get_wtime();
-        std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
-
-        double end_t = omp_get_wtime();
-        std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
-
-        ///////////////////////////////////////////////////////////////////////////
-        // TODO: 6
-        double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
-        assert(Z != NULL);
-
-        for (int i = 0; i < m; i++)
+        for (int i = 0; i < n; i++)
         {
                 for (int j = 0; j < n; j++)
                 {
-                        // TODO: Reconstruct image here.  Don't forget to denormalize.  The
-                        // dimension of the reconstructed image is m x n (rows x columns).
-                        // Z[i*n + j] = ...
+                        std::cout << "element[ : " << i << ", " << j << "] = " << C[i * n + j] << std::endl;
+                        std::cout << std::endl;
                 }
         }
 
-        // Write the reconstructed image in ascii format.  You can view the image
-        // in Matlab with the show_image.m script.
-        write_ascii(out_filename, Z, m, n);
+        // t_elapsed += omp_get_wtime();
+        // std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
-        // cleanup
-        delete[] work;
-        delete[] W;
-        delete[] C;
-        delete[] Z;
-        delete[] PCReduced;
+        // ///////////////////////////////////////////////////////////////////////////
+        // // TODO 4. LAPACK
+        // t_elapsed = -omp_get_wtime();
+
+        // // see also for the interface to dsyev_():
+        // // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
+        // char jobz = '?'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
+        // char uplo = '?'; // TODO: how did you compute the (symmetric) covariance matrix?
+        // int info, lwork;
+
+        // double *W = new (std::nothrow) double[n]; // eigenvalues
+        // assert(W != NULL);
+
+        // double *work = new (std::nothrow) double[2];
+        // assert(work != NULL);
+
+        // // first call to dsyev_() with lwork = -1 to determine the optimal
+        // // workspace (cheap call)
+        // lwork = -1;
+
+        // // TODO: call dsyev here
+
+        // lwork = (int)work[0];
+        // delete[] work;
+
+        // // allocate optimal workspace
+        // work = new (std::nothrow) double[lwork];
+        // assert(work != NULL);
+
+        // // second call to dsyev_(), eigenvalues and eigenvectors are computed here
+        // // TODO: call dsyev here
+
+        // t_elapsed += omp_get_wtime();
+        // std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
+        // ///////////////////////////////////////////////////////////////////////////
+
+        // ///////////////////////////////////////////////////////////////////////////
+        // // TODO: 5.
+        // t_elapsed = -omp_get_wtime();
+        // double *PCReduced = new (std::nothrow) double[m*npc];
+        // assert(PCReduced != NULL);
+
+        // for (int i = 0; i < m; i++)
+        // {
+        //         for (int j = 0; j < npc; j++)
+        //         {
+        //                 // TODO: compute the principal components
+        //         }
+        // }
+
+        // // TODO: Report the compression ratio
+
+        // t_elapsed += omp_get_wtime();
+        // std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
+        // ///////////////////////////////////////////////////////////////////////////
+
+        // double end_t = omp_get_wtime();
+        // std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
+
+        // ///////////////////////////////////////////////////////////////////////////
+        // // TODO: 6
+        // double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
+        // assert(Z != NULL);
+
+        // for (int i = 0; i < m; i++)
+        // {
+        //         for (int j = 0; j < n; j++)
+        //         {
+        //                 // TODO: Reconstruct image here.  Don't forget to denormalize.  The
+        //                 // dimension of the reconstructed image is m x n (rows x columns).
+        //                 // Z[i*n + j] = ...
+        //         }
+        // }
+
+        // // Write the reconstructed image in ascii format.  You can view the image
+        // // in Matlab with the show_image.m script.
+        // write_ascii(out_filename, Z, m, n);
+        // ///////////////////////////////////////////////////////////////////////////
+
+        // // cleanup
+        // delete[] work;
+        // delete[] W;
+        // delete[] C;
+        // delete[] Z;
+        // delete[] PCReduced;
         delete[] A;
         delete[] AMean;
         delete[] AStd;
