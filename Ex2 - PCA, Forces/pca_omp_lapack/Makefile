@@ -5,7 +5,7 @@ CFLAGS = -O3 -Wall
 
 MKL_SERIAL_LINK=
 MKL_PARA_LINK=
-LDFLAGS = -lm -lpthread -lz -ldl -fopenmp
+LDFLAGS = -lm -lpthread -lz -ldl -fopenmp -llapack
 
 all: pca_seq pca_omp
 
