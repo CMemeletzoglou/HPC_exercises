@@ -71,17 +71,16 @@ void write_ascii(const char* const filename, const double* const data, const int
 /* compute the covariance of the two row-vectors corresponding to lines i and j
  * of matrix A
  */
-double cov(double *A, int i, int j, int n, int m, double *AMean)
+double cov(double *A, int i, int j, int n, int m)
 {
         double tmp = 0.0;
         for (int k = 0; k < m; k++)
         {
                 // compute cov(A(:,i), A(:,j))
-                tmp += (A[i * m + k] - AMean[i]) * (A[j * m + k] - AMean[j]);
+                tmp += (A[i * m + k]) * (A[j * m + k]);
         }
-        return (tmp / m-1); //cov calculated (C(i,j) element)
+        return (tmp / (m - 1)); // cov calculated (C(i,j) element)
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -171,7 +170,7 @@ int main(int argc, char **argv)
         // TODO: Implement your PCA algorithm here
         // 1. Compute mean and standard deviation of your image features (= image columns) (**DONE**)
         // 2. Normalize the data (**DONE**)
-        // 3. Build the covariance matrix
+        // 3. Build the covariance matrix (**DONE**)
         // 4. Compute the eigenvalues and eigenvectors of the covariance matrix.
         //    Use LAPACK here.
         // 5. Compute the principal components and report the compression ratio
@@ -213,8 +212,6 @@ int main(int argc, char **argv)
                         col_sum += pow((A[i*m+j] - col_mean), 2);
                 }
                 AStd[i] = sqrt(col_sum / (m - 1));
-
-                // std::cout << "index : " << i S<< " mean = " << AMean[i] << " || std = " << AStd[i] << std::endl;                
         }
 
         t_elapsed += omp_get_wtime();
@@ -251,7 +248,7 @@ int main(int argc, char **argv)
         double *C = new (std::nothrow) double[n*n]; // covariance matrix
         assert(C != NULL);
 
-        // TODO: Compute covariance matrix here
+        // TODO: Compute covariance matrix here (**DONE**)
 
         /* For a m x n matrix, where each of the m rows is an observation and each of the 
          * n columns is a Random variable vector, the Covariance matrix can be calculated as :
@@ -261,35 +258,29 @@ int main(int argc, char **argv)
          * Therefore, each element of the Covariance matrix is the pairwise covariance of 
          * each column vector combination.
          * For the array A, we have : C(i,j) = cov(A(i,:), A(j,:))
+         *
+         * In order to compute the covariance matrix, we need the mean and standard deviation
+         * of each row of the **NORMALIZED** data matrix A. (remember : covariance = std^2)
+         * 
+         * So we CAN'T use the values AMean[i] and AStd[i] for the mean and standard deviation 
+         * of the row vectors, because those values correspond to the initial 
+         * **NON-NORMALIZED** matrix. 
+         * 
+         * For the normalized matrix, each row has a mean of 0 and an std of 1.
          */
-
-        // Triple nested for? outer loop for A-row selection and then two loops to compute the covariance 
-        // with each other row of A (A is n x m)
-        for (int i = 0; i < n; i++) // pick first row of A (col of I)
+        for (int i = 0; i < n; i++)
         {
-                for (int j = 0; j < n; j++) // pick second row of A (col of I)
+                // C(i,i)  = var(Xi) = AStd[i]^2
+                C[i * n + i] = 1;
+                for (int j = i + 1; j < n; j++)
                 {
-                        // if(i != j)
-                        // {
-                                C[i*n+j] = cov(A, i, j, n, m, AMean);
-                        // }
+                        // C(i,j) = C(j,i) = cov(Xi, Xj)
+                        C[i * n + j] = cov(A, i, j, n, m);
+                        C[j * n + i] = C[i * n + j];
                 }
         }
-
-        std::cout << "Finished calculating covariance matrix" << std::endl;
-
-        for (int i = 0; i < 5; i++)
-        {
-                for (int j = 0; j < 5; j++)
-                {
-                        std::cout << "element[ " << i << ", " << j << "] = " << C[i * n + j] << std::endl;
-                        std::cout << std::endl;
-                }
-        }
-        std::cout << "Finished calculating covariance matrix 22" << std::endl;
-
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
+        t_elapsed += omp_get_wtime();
+        std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
         // ///////////////////////////////////////////////////////////////////////////

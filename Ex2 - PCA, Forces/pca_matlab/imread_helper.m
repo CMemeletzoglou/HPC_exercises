@@ -29,3 +29,4 @@ C = cov(B);
 imshow(reshape(F, 700, 469)');
 
 
+
