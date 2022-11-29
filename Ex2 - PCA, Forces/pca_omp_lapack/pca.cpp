@@ -77,6 +77,13 @@ void print_matrix(matrix_t* A, int n, int m, int limit_n, int limit_m) {
                 std::cout << A[i*n+limit_m-1] << "\n";
         }
 }
+
+void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf) {
+        for (int i = 0; i < n; i++) {
+                buf[i] = M[i*m+col_idx];
+        }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /* compute the covariance of the two row-vectors corresponding to lines i and j
@@ -288,7 +295,7 @@ int main(int argc, char **argv)
                 {
                         // C(i,j) = C(j,i) = cov(Xi, Xj)
                         C[i * n + j] = cov(A, i, j, n, m);
-                        C[j * n + i] = C[i * n + j];
+                        // C[j * n + i] = C[i * n + j];
                 }
         }
         
@@ -328,48 +335,54 @@ int main(int argc, char **argv)
         // second call to dsyev_(), eigenvalues and eigenvectors are computed here
         dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
 
-        double sum = 0.0;
-        for(int i=0; i<n; i++)
-                sum += W[i];
-        //         printf("Eigenvalue  %d = %.8f\n", i, W[i]);
-
-        // print_matrix<double>(C, 700, 700, 700, 700);
-
-        printf("sum = %.8f\n", sum);
-
-        
-        
-
-       
-
         t_elapsed += omp_get_wtime();
         std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
         ///////////////////////////////////////////////////////////////////////////
         // TODO: 5.
-        // t_elapsed = -omp_get_wtime();
-        // double *PCReduced = new (std::nothrow) double[m*npc];
-        // assert(PCReduced != NULL);
+        t_elapsed = -omp_get_wtime();
+        double *PCReduced = new (std::nothrow) double[m*npc](); // Initializes memory to 0
+        assert(PCReduced != NULL);
 
-        // for (int i = 0; i < m; i++)
-        // {
-        //         for (int j = 0; j < npc; j++) // keep the first npc principal components
-        //         {
-        //                 // TODO: compute the principal components
+        double* buf = new (std::nothrow) double[n];
+        assert(buf != NULL);
 
-                        
-        //         }
-        // }
+        int c_offset = n - npc;
+        int c_row = 0;
 
-        // // TODO: Report the compression ratio
+        // Note: dsyev_ returns the eigenvectors in a form of matrix, where each row is one
+        // eigenvector. This matrix is stored in C.
+        for (int i = 0; i < m; i++)
+        {
+                cp_column_in_buffer(A, n, m, i, buf);
+                for (int j = 0; j < npc; j++) // keep the first npc principal components
+                /* I disagree with the comment above, 
+                 * since Matlab code preserves LAST npc columns - we should keep the LAST npc rows, 
+                 * since these are the last npc principal components
+                 */
+                {
+                        // TODO: compute the principal components
+                        // C -> n x n || A -> n x m
+                        c_row = c_offset + j;
+                        for (int k = 0; k < n; k++) {
+                                PCReduced[i*npc + j] += buf[k] * C[c_row*n + k];
+                        }
+                }
+        }
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        delete[] buf;
 
-        // double end_t = omp_get_wtime();
-        // std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
+        print_matrix<double>(PCReduced, m, npc, m, npc);
+
+        // TODO: Report the compression ratio
+
+        t_elapsed += omp_get_wtime();
+        std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
+
+        double end_t = omp_get_wtime();
+        std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
 
         ///////////////////////////////////////////////////////////////////////////
         // // TODO: 6
@@ -396,7 +409,7 @@ int main(int argc, char **argv)
         delete[] W;
         delete[] C;
         // delete[] Z;
-        // delete[] PCReduced;
+        delete[] PCReduced;
         delete[] A;
         delete[] AMean;
         delete[] AStd;
