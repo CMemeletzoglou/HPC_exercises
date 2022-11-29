@@ -1,6 +1,5 @@
 # Make sure to load: gcc, mkl
-
-CC = g++-12
+CC = g++
 CFLAGS = -O3 -Wall
 
 MKL_SERIAL_LINK=
@@ -20,6 +19,15 @@ pca_omp: pca_omp.o
 
 pca_omp.o: pca.cpp
 	$(CC) $(CFLAGS) -fopenmp -o pca_omp.o -c pca.cpp
+
+run_elvis:
+	./pca_seq -m 496 -n 700 -npc 50 -if ../pca_data/elvis.bin.gz -of elvis.50.bin
+
+run_cyclone:
+	./pca_seq -m 4096 -n 4096 -npc 50 -if ../pca_data/cyclone.bin.gz -of cyclone.50.bin
+
+run_earth:
+	./pca_seq -m 9500 -n 9500 -npc 50 -if ../pca_data/earth.bin.gz -of earth.50.bin
 
 clean:
 	rm -f *.o *~ pca_seq pca_omp

@@ -13,6 +13,7 @@
 // interface for LAPACK routines.
 #include <lapack.h>
 
+#include <iomanip> 
 
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
@@ -65,6 +66,16 @@ void write_ascii(const char* const filename, const double* const data, const int
                 fprintf(fp, "\n");
         }
         fclose(fp);
+}
+
+template <typename matrix_t>
+void print_matrix(matrix_t* A, int n, int m, int limit_n, int limit_m) {
+        for (int i = 0; i < limit_n; i++) {
+                for (int j = 0; j < limit_m-1; j++) {
+                        std::cout << std::setw(10) << A[i*n+j] << ", ";
+                }
+                std::cout << A[i*n+limit_m-1] << "\n";
+        }
 }
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -172,7 +183,7 @@ int main(int argc, char **argv)
         // 2. Normalize the data (**DONE**)
         // 3. Build the covariance matrix (**DONE**)
         // 4. Compute the eigenvalues and eigenvectors of the covariance matrix.
-        //    Use LAPACK here.
+        //    Use LAPACK here. (**DONE**)
         // 5. Compute the principal components and report the compression ratio
         // 6. Reconstruct the image from the compressed data and dump the image in
         //    ascii.
@@ -276,48 +287,52 @@ int main(int argc, char **argv)
                 {
                         // C(i,j) = C(j,i) = cov(Xi, Xj)
                         C[i * n + j] = cov(A, i, j, n, m);
-                        C[j * n + i] = C[i * n + j];
+                        // C[j * n + i] = C[i * n + j];
                 }
         }
+        print_matrix<double>(C, 700, 700, 10, 10);
         t_elapsed += omp_get_wtime();
+        return 0;
         std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO 4. LAPACK
-        // t_elapsed = -omp_get_wtime();
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO 4. LAPACK (dsyev call)
+        t_elapsed = -omp_get_wtime();
 
-        // // see also for the interface to dsyev_():
-        // // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
-        // char jobz = '?'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        // char uplo = '?'; // TODO: how did you compute the (symmetric) covariance matrix?
-        // int info, lwork;
+        // see also for the interface to dsyev_():
+        // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
+        char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
+        char uplo = 'L'; // TODO: how did you compute the (symmetric) covariance matrix?
+        int info, lwork;
 
-        // double *W = new (std::nothrow) double[n]; // eigenvalues
-        // assert(W != NULL);
+        double *W = new (std::nothrow) double[n]; // eigenvalues
+        assert(W != NULL);
 
-        // double *work = new (std::nothrow) double[2];
-        // assert(work != NULL);
+        double *work = new (std::nothrow) double[1];
+        assert(work != NULL);
 
-        // // first call to dsyev_() with lwork = -1 to determine the optimal
-        // // workspace (cheap call)
-        // lwork = -1;
+        // first call to dsyev_() with lwork = -1 to determine the optimal
+        // workspace (cheap call)
+        lwork = -1;      
+        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
 
-        // // TODO: call dsyev here
+        lwork = (int)work[0];
+        delete[] work;
 
-        // lwork = (int)work[0];
-        // delete[] work;
+        // allocate optimal workspace
+        work = new (std::nothrow) double[lwork];
+        assert(work != NULL);
 
-        // // allocate optimal workspace
-        // work = new (std::nothrow) double[lwork];
-        // assert(work != NULL);
+        // second call to dsyev_(), eigenvalues and eigenvectors are computed here
+        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
 
-        // // second call to dsyev_(), eigenvalues and eigenvectors are computed here
-        // // TODO: call dsyev here
+        for(int i=0; i<n; i++)
+                printf("Eigenvalue  %d = %.8f\n", i, W[i]);
 
-        // t_elapsed += omp_get_wtime();
-        // std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
-        // ///////////////////////////////////////////////////////////////////////////
+        t_elapsed += omp_get_wtime();
+        std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
+        ///////////////////////////////////////////////////////////////////////////
 
         // ///////////////////////////////////////////////////////////////////////////
         // // TODO: 5.
@@ -363,8 +378,8 @@ int main(int argc, char **argv)
         // ///////////////////////////////////////////////////////////////////////////
 
         // // cleanup
-        // delete[] work;
-        // delete[] W;
+        delete[] work;
+        delete[] W;
         delete[] C;
         // delete[] Z;
         // delete[] PCReduced;
