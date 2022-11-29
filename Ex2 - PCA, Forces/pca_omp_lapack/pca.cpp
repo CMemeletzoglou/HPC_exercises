@@ -283,16 +283,17 @@ int main(int argc, char **argv)
         {
                 // C(i,i)  = var(Xi) = AStd[i]^2
                 C[i * n + i] = 1;
-                for (int j = i + 1; j < n; j++)
+                // for (int j = i + 1; j < n; j++)
+                for (int j = 0; j < i; j++)
                 {
                         // C(i,j) = C(j,i) = cov(Xi, Xj)
                         C[i * n + j] = cov(A, i, j, n, m);
-                        // C[j * n + i] = C[i * n + j];
+                        C[j * n + i] = C[i * n + j];
                 }
         }
-        print_matrix<double>(C, 700, 700, 10, 10);
+        
         t_elapsed += omp_get_wtime();
-        return 0;
+        // return 0;
         std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
@@ -302,8 +303,9 @@ int main(int argc, char **argv)
 
         // see also for the interface to dsyev_():
         // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
-        char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        char uplo = 'L'; // TODO: how did you compute the (symmetric) covariance matrix?
+        const char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
+        // const char uplo = 'L'; // TODO: how did you compute the (symmetric) covariance matrix?
+        const char uplo = 'U'; // TODO: how did you compute the (symmetric) covariance matrix?
         int info, lwork;
 
         double *W = new (std::nothrow) double[n]; // eigenvalues
@@ -312,8 +314,7 @@ int main(int argc, char **argv)
         double *work = new (std::nothrow) double[1];
         assert(work != NULL);
 
-        // first call to dsyev_() with lwork = -1 to determine the optimal
-        // workspace (cheap call)
+        // first call to dsyev_() with lwork = -1 to determine the optimal workspace (cheap call)
         lwork = -1;      
         dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
 
@@ -327,24 +328,37 @@ int main(int argc, char **argv)
         // second call to dsyev_(), eigenvalues and eigenvectors are computed here
         dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
 
+        double sum = 0.0;
         for(int i=0; i<n; i++)
-                printf("Eigenvalue  %d = %.8f\n", i, W[i]);
+                sum += W[i];
+        //         printf("Eigenvalue  %d = %.8f\n", i, W[i]);
+
+        // print_matrix<double>(C, 700, 700, 700, 700);
+
+        printf("sum = %.8f\n", sum);
+
+        
+        
+
+       
 
         t_elapsed += omp_get_wtime();
         std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
         ///////////////////////////////////////////////////////////////////////////
 
-        // ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 5.
+        ///////////////////////////////////////////////////////////////////////////
+        // TODO: 5.
         // t_elapsed = -omp_get_wtime();
         // double *PCReduced = new (std::nothrow) double[m*npc];
         // assert(PCReduced != NULL);
 
         // for (int i = 0; i < m; i++)
         // {
-        //         for (int j = 0; j < npc; j++)
+        //         for (int j = 0; j < npc; j++) // keep the first npc principal components
         //         {
         //                 // TODO: compute the principal components
+
+                        
         //         }
         // }
 
@@ -357,7 +371,7 @@ int main(int argc, char **argv)
         // double end_t = omp_get_wtime();
         // std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
 
-        // ///////////////////////////////////////////////////////////////////////////
+        ///////////////////////////////////////////////////////////////////////////
         // // TODO: 6
         // double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
         // assert(Z != NULL);

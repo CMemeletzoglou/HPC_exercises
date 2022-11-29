@@ -15,6 +15,7 @@ B     = (I-repmat(IMean,[m, 1]))./repmat(IStd,[m, 1]);
 
 C = cov(B);
 
+[V, D] = eig(C);
 
 
 % A = rot90(I, -1);
@@ -27,6 +28,5 @@ C = cov(B);
 
 % transpose this to see the normal picture
 imshow(reshape(F, 700, 469)');
-
 
 
