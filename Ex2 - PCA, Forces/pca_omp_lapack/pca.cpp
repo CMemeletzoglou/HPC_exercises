@@ -83,11 +83,12 @@ void print_matrix(matrix_t* A, int n, int m, int limit_n, int limit_m)
 /* Helper function to gather the data contained in column col_idx of the n x m
  * array passed in the first argument, into the buf buffer
  */
-void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf) 
+void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf, int row_offset = 0)
 {
-        for (int i = 0; i < n; i++)
+        int count = 0;
+        for (int i = row_offset; i < n; i++)
         {
-                buf[i] = M[i * m + col_idx];
+                buf[count++] = M[i * m + col_idx];
         }
 }
 
@@ -359,15 +360,15 @@ int main(int argc, char **argv)
         /* Note: dsyev_ returns the eigenvectors in a form of matrix, where each **row**
          * is one eigenvector. This matrix is stored in C.
          */
-        int c_offset = n - npc;
+        const int c_offset = n - npc;
         int c_row = 0;
-        for(int i=0; i<m; i++)
+        for (int i = 0; i < m; i++)
         {
                 // gather the data from the i-th column into the buf buffer
                 cp_column_in_buffer(A, n, m, i, buf);
                 
                 // pick a principal component (i.e an eigenvector = row vector of C)
-                for(int pc=0; pc<npc; pc++) // keep the first npc principal components
+                for (int pc = 0; pc < npc; pc++) // keep the first npc principal components
                 {
                         c_row = c_offset + pc;
                         
@@ -388,31 +389,54 @@ int main(int argc, char **argv)
         double end_t = omp_get_wtime();
         std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
 
+        /////////////////////////////////////////////////////////////////////////
+        // TODO: 6
+        double *Z = new (std::nothrow) double[m*n](); // memory for reconstructed image (init to zero)
+        assert(Z != NULL);
+
+        double *cred_col_buf = new (std::nothrow) double[npc]; 
+        assert(cred_col_buf != NULL);
+
+        // PCReduced * VReduced
+
+        // TODO : optimize the following part...
+
+        // A = n x m => I = m x n 
+        for (int i = 0; i < m; i++)
+        {
+                for (int j = 0; j < n; j++)
+                {
+                        // TODO: Reconstruct image here.  Don't forget to denormalize.  The
+                        // dimension of the reconstructed image is m x n (rows x columns).
+                        // Z[i*n + j] = ...
+
+                        cp_column_in_buffer(C, n, n, j, cred_col_buf, c_offset); 
+
+                        for (int k = 0; k < npc; k++)
+                        {
+                                Z[i * n + j] += ( (PCReduced[i * npc + k] * cred_col_buf[k]) * AStd[j] );
+                        }
+
+                        Z[i * n + j] += AMean[j];
+                }
+        }
+
+        // print_matrix(Z, m, n, 10, 10);
+
+
+
+        delete [] cred_col_buf;
+
+        // Write the reconstructed image in ascii format.  You can view the image
+        // in Matlab with the show_image.m script.
+        write_ascii(out_filename, Z, m, n);
         ///////////////////////////////////////////////////////////////////////////
-        // // TODO: 6
-        // double *Z = new (std::nothrow) double[m*n]; // memory for reconstructed image
-        // assert(Z != NULL);
-
-        // for (int i = 0; i < m; i++)
-        // {
-        //         for (int j = 0; j < n; j++)
-        //         {
-        //                 // TODO: Reconstruct image here.  Don't forget to denormalize.  The
-        //                 // dimension of the reconstructed image is m x n (rows x columns).
-        //                 // Z[i*n + j] = ...
-        //         }
-        // }
-
-        // // Write the reconstructed image in ascii format.  You can view the image
-        // // in Matlab with the show_image.m script.
-        // write_ascii(out_filename, Z, m, n);
-        // ///////////////////////////////////////////////////////////////////////////
 
         // // cleanup
         delete[] work;
         delete[] W;
         delete[] C;
-        // delete[] Z;
+        delete[] Z;
         delete[] PCReduced;
         delete[] A;
         delete[] AMean;

@@ -34,4 +34,4 @@ PCReduced = B*VReduced;
 Z = ((PCReduced * VReduced') .* repmat(AStd,[m, 1])) + repmat(AMean,[m, 1]);
 
 % show the image
-imshow(uint8(round(Z)))
+figure;imshow(uint8(round(Z)))

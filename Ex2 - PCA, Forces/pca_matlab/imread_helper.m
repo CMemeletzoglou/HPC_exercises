@@ -22,6 +22,7 @@ keepN = 50;
 VReduced  = V(:, (n-keepN+1):n);
 PCReduced = B*VReduced;
 
+Z = ((PCReduced * VReduced') .* repmat(IStd,[m, 1])) + repmat(IMean,[m, 1]);
 
 
 
@@ -39,4 +40,12 @@ PCReduced = B*VReduced;
 % transpose this to see the normal picture
 imshow(reshape(F, 700, 469)');
 
+
+
+
+fid = fopen('elvis.50.bin', 'r');
+F = fread(fid, inf, 'double');
+
+I = reshape(F, 700, 469)';
+figure; imshow(I);
 
