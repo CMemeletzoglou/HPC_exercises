@@ -69,18 +69,25 @@ void write_ascii(const char* const filename, const double* const data, const int
 }
 
 template <typename matrix_t>
-void print_matrix(matrix_t* A, int n, int m, int limit_n, int limit_m) {
-        for (int i = 0; i < limit_n; i++) {
-                for (int j = 0; j < limit_m-1; j++) {
+void print_matrix(matrix_t* A, int n, int m, int limit_n, int limit_m)
+{
+        for (int i = 0; i < limit_n; i++)
+        {
+                for (int j = 0; j < limit_m-1; j++)
+                {
                         std::cout << std::setw(10) << A[i*n+j] << ", ";
                 }
                 std::cout << A[i*n+limit_m-1] << "\n";
         }
 }
-
-void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf) {
-        for (int i = 0; i < n; i++) {
-                buf[i] = M[i*m+col_idx];
+/* Helper function to gather the data contained in column col_idx of the n x m
+ * array passed in the first argument, into the buf buffer
+ */
+void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf)
+{
+        for (int i = 0; i < n; i++)
+        {
+                buf[i] = M[i * m + col_idx];
         }
 }
 
@@ -345,35 +352,48 @@ int main(int argc, char **argv)
         double *PCReduced = new (std::nothrow) double[m*npc](); // Initializes memory to 0
         assert(PCReduced != NULL);
 
-        double* buf = new (std::nothrow) double[n];
+        double *buf = new (std::nothrow) double[n];
         assert(buf != NULL);
 
-        int c_offset = n - npc;
-        int c_row = 0;
+        // int c_offset = n - npc;
+        // int c_row = 0;
 
-        // Note: dsyev_ returns the eigenvectors in a form of matrix, where each row is one
-        // eigenvector. This matrix is stored in C.
-        for (int i = 0; i < m; i++)
+        /* Note: dsyev_ returns the eigenvectors in a form of matrix, where each **row**
+         * is one eigenvector. This matrix is stored in C.
+         */
+        // for (int i = 0; i < m; i++)
+        // {
+        //         cp_column_in_buffer(A, n, m, i, buf); // get all data of the i-th column
+        //         for (int j = 0; j < npc; j++) // keep the first npc principal components
+        //         /* I disagree with the comment above, 
+        //          * since Matlab code preserves LAST npc columns - we should keep the LAST npc rows, 
+        //          * since these are the last npc principal components
+        //          */
+        //         {
+        //                 // TODO: compute the principal components
+        //                 // C -> n x n || A -> n x m
+        //                 c_row = c_offset + j;
+        //                 for (int k = 0; k < n; k++)
+        //                         PCReduced[i*npc + j] += buf[k] * C[c_row*n + k];
+        //         }
+        // }
+
+        for(int i=0; i<m; i++)
         {
+                // gather the data from the i-th column into the buf buffer
                 cp_column_in_buffer(A, n, m, i, buf);
-                for (int j = 0; j < npc; j++) // keep the first npc principal components
-                /* I disagree with the comment above, 
-                 * since Matlab code preserves LAST npc columns - we should keep the LAST npc rows, 
-                 * since these are the last npc principal components
-                 */
+                
+                // pick a principal component (i.e an eigenvector = row vector of C)
+                for(int pc=0; pc<npc; pc++) 
                 {
-                        // TODO: compute the principal components
-                        // C -> n x n || A -> n x m
-                        c_row = c_offset + j;
-                        for (int k = 0; k < n; k++) {
-                                PCReduced[i*npc + j] += buf[k] * C[c_row*n + k];
-                        }
+                        for(int j=0; j<n; j++) // iterate through the eigenvector
+                                PCReduced[i* npc + pc] += buf[j] * C[pc * n + j];
                 }
         }
 
         delete[] buf;
 
-        print_matrix<double>(PCReduced, m, npc, m, npc);
+        print_matrix<double>(PCReduced, m, npc, 10, 10);
 
         // TODO: Report the compression ratio
 

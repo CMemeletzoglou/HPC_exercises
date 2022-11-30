@@ -1,3 +1,4 @@
+clear; clc;
 gunzip('elvis.bin.gz');
 
 fid = fopen('elvis.bin', 'r');
@@ -16,6 +17,15 @@ B     = (I-repmat(IMean,[m, 1]))./repmat(IStd,[m, 1]);
 C = cov(B);
 
 [V, D] = eig(C);
+
+keepN = 50;
+VReduced  = V(:, (n-keepN+1):n);
+PCReduced = B*VReduced;
+
+
+
+
+
 
 
 % A = rot90(I, -1);
