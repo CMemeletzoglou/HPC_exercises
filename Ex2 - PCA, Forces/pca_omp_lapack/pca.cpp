@@ -91,6 +91,25 @@ void cp_column_in_buffer(double* M, int n, int m, int col_idx, double* buf, int 
                 buf[count++] = M[i * m + col_idx];
         }
 }
+/* Helper function to extract the npc last prinical components from C
+ * into MReduced
+ */
+
+void extract_transpose_matrix(double *M, int n, int m, int nrows, double *MReduced)
+{
+        // M => n x m , return MReduced => m x nrows
+        int row = 0;
+        
+        for (int i = 0; i < n; i++)
+        {
+                row = n - nrows + i;
+                for (int j = 0; j < m; j++)
+                {
+                        MReduced[j * nrows + i] = M[row * m + j];
+                }
+        }
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -394,14 +413,19 @@ int main(int argc, char **argv)
         double *Z = new (std::nothrow) double[m*n](); // memory for reconstructed image (init to zero)
         assert(Z != NULL);
 
-        double *cred_col_buf = new (std::nothrow) double[npc]; 
-        assert(cred_col_buf != NULL);
-
         // PCReduced * VReduced
 
         // TODO : optimize the following part...
 
         // A = n x m => I = m x n 
+
+      
+
+        double *CReduced = new (std::nothrow) double[n*npc];
+        assert(CReduced != NULL);
+
+        extract_transpose_matrix(C, n, n, npc, CReduced);
+
         for (int i = 0; i < m; i++)
         {
                 for (int j = 0; j < n; j++)
@@ -410,21 +434,15 @@ int main(int argc, char **argv)
                         // dimension of the reconstructed image is m x n (rows x columns).
                         // Z[i*n + j] = ...
 
-                        cp_column_in_buffer(C, n, n, j, cred_col_buf, c_offset); //asdfa
-
                         for (int k = 0; k < npc; k++)
                         {
-                                Z[i * n + j] += PCReduced[i * npc + k] * cred_col_buf[k];
+                                Z[i * n + j] += PCReduced[i * npc + k] * CReduced[j * npc + k];
                         }
                         Z[i * n + j] = (Z[i * n + j]* AStd[j]) + AMean[j];
                 }
         }
 
         // print_matrix(Z, m, n, 10, 10);
-
-
-
-        delete [] cred_col_buf;
 
         // Write the reconstructed image in ascii format.  You can view the image
         // in Matlab with the show_image.m script.
@@ -437,6 +455,7 @@ int main(int argc, char **argv)
         delete[] C;
         delete[] Z;
         delete[] PCReduced;
+        delete[] CReduced;
         delete[] A;
         delete[] AMean;
         delete[] AStd;
