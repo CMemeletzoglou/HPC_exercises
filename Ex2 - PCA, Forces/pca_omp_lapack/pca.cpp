@@ -100,7 +100,7 @@ void extract_transpose_matrix(double *M, int n, int m, int nrows, double *MReduc
         // M => n x m , return MReduced => m x nrows
         int row = 0;
         
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < nrows; i++)
         {
                 row = n - nrows + i;
                 for (int j = 0; j < m; j++)
