@@ -410,14 +410,13 @@ int main(int argc, char **argv)
                         // dimension of the reconstructed image is m x n (rows x columns).
                         // Z[i*n + j] = ...
 
-                        cp_column_in_buffer(C, n, n, j, cred_col_buf, c_offset); 
+                        cp_column_in_buffer(C, n, n, j, cred_col_buf, c_offset); //asdfa
 
                         for (int k = 0; k < npc; k++)
                         {
-                                Z[i * n + j] += ( (PCReduced[i * npc + k] * cred_col_buf[k]) * AStd[j] );
+                                Z[i * n + j] += PCReduced[i * npc + k] * cred_col_buf[k];
                         }
-
-                        Z[i * n + j] += AMean[j];
+                        Z[i * n + j] = (Z[i * n + j]* AStd[j]) + AMean[j];
                 }
         }
 
