@@ -418,9 +418,12 @@ int main(int argc, char **argv)
         // TODO : optimize the following part...
 
         // A = n x m => I = m x n 
-
-      
-
+        /* CReduced contains the transposed last npc lines of the covariance matrix C.
+         * In order to obtain the final reconstructed matrix, we perform matrix
+         * multiplication using one row of the PCReduced matrix and one **row** of the
+         * CReduced matrix. The transposition of matrix C, helps us perform the MM
+         * in a row-wise manner
+         */
         double *CReduced = new (std::nothrow) double[n*npc];
         assert(CReduced != NULL);
 
@@ -442,7 +445,7 @@ int main(int argc, char **argv)
                 }
         }
 
-        // print_matrix(Z, m, n, 10, 10);
+        print_matrix(Z, m, n, 10, 10);
 
         // Write the reconstructed image in ascii format.  You can view the image
         // in Matlab with the show_image.m script.
