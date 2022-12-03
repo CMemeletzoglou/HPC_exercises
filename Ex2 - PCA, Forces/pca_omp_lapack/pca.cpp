@@ -1,5 +1,5 @@
 // File       : pca.cpp
-// Description: Principal component analysis applied to image compression
+// Description: Principal component analysis applied to image compression (Serial version)
 #include <iostream>
 #include <cstdio>
 #include <cstring>
@@ -15,7 +15,7 @@
 
 #include <iomanip> 
 
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
 // helpers
 double *read_gzfile(char *filename, int frows, int fcols, int rows, int cols)
 {
@@ -111,7 +111,7 @@ void extract_transpose_matrix(double *M, int n, int m, int nrows, double *MReduc
 }
 
 
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
 
 /* compute the covariance of the two row-vectors corresponding to lines i and j
  * of matrix A
@@ -127,13 +127,13 @@ double cov(double *A, int i, int j, int n, int m)
         return (tmp / (m - 1)); // cov calculated (C(i,j) element)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
 //
 // elvis.bin.gz:   469x700
 // cyclone.bin.gz: 4096x4096
 // earth.bin.gz:   9500x9500
 //
-///////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
 int main(int argc, char **argv)
 {
         // input parameters (default)
@@ -183,12 +183,12 @@ int main(int argc, char **argv)
         
         double t_elapsed;
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // Read image data.  The image dimension is m x n.  The returned pointer
         // points to the data in row-major order.  That is, if (i,j) corresponds to
         // to the row and column index, respectively, you access the data with
         // pixel_{i,j} = I[i*n + j], where 0 <= i < m and 0 <= j < n.
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         double *I = read_gzfile(inp_filename, m, n, m, n);
 
         // The algorithm works by processing the matrix data in a **columnwise** manner.
@@ -207,11 +207,11 @@ int main(int argc, char **argv)
         }
         delete[] I;
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // The compressed image file is stored in a **row-wise** manner
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO: Implement your PCA algorithm here
         // 1. Compute mean and standard deviation of your image features (= image columns) (**DONE**)
         // 2. Normalize the data (**DONE**)
@@ -221,10 +221,10 @@ int main(int argc, char **argv)
         // 5. Compute the principal components and report the compression ratio (**DONE**)
         // 6. Reconstruct the image from the compressed data and dump the image in
         //    ascii.
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         double start_t = omp_get_wtime();
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO: 1.
         t_elapsed = -omp_get_wtime();
 
@@ -261,9 +261,9 @@ int main(int argc, char **argv)
 
         t_elapsed += omp_get_wtime();
         std::cout << "MEAN/STD TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO: 2.
         t_elapsed = -omp_get_wtime();
 
@@ -285,9 +285,9 @@ int main(int argc, char **argv)
 
         t_elapsed += omp_get_wtime();
         std::cout << "NORMAL TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO: 3.
         t_elapsed = -omp_get_wtime();
         double *C = new (std::nothrow) double[n*n]; // covariance matrix
@@ -317,7 +317,6 @@ int main(int argc, char **argv)
         {
                 // C(i,i)  = var(Xi) = AStd[i]^2
                 C[i * n + i] = 1;
-                // for (int j = i + 1; j < n; j++)
                 for (int j = 0; j < i; j++)
                 {
                         // C(i,j) = C(j,i) = cov(Xi, Xj)
@@ -329,16 +328,15 @@ int main(int argc, char **argv)
         t_elapsed += omp_get_wtime();
         // return 0;
         std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO 4. LAPACK (dsyev call)
         t_elapsed = -omp_get_wtime();
 
         // see also for the interface to dsyev_():
         // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
         const char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        // const char uplo = 'L'; // TODO: how did you compute the (symmetric) covariance matrix?
         const char uplo = 'U'; // TODO: how did you compute the (symmetric) covariance matrix?
         int info, lwork;
 
@@ -364,9 +362,9 @@ int main(int argc, char **argv)
 
         t_elapsed += omp_get_wtime();
         std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
         // TODO: 5.
         t_elapsed = -omp_get_wtime();
         double *PCReduced = new (std::nothrow) double[m*npc](); // Initializes memory to 0
@@ -403,7 +401,7 @@ int main(int argc, char **argv)
 
         t_elapsed += omp_get_wtime();
         std::cout << "PCREDUCED TIME=" << t_elapsed << " seconds\n";
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
         double end_t = omp_get_wtime();
         std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
@@ -414,8 +412,6 @@ int main(int argc, char **argv)
         assert(Z != NULL);
 
         // PCReduced * VReduced
-
-        // TODO : optimize the following part...
 
         // A = n x m => I = m x n 
         /* CReduced contains the transposed last npc lines of the covariance matrix C.
@@ -445,14 +441,12 @@ int main(int argc, char **argv)
                 }
         }
 
-        print_matrix(Z, m, n, 10, 10);
-
         // Write the reconstructed image in ascii format.  You can view the image
         // in Matlab with the show_image.m script.
         write_ascii(out_filename, Z, m, n);
-        ///////////////////////////////////////////////////////////////////////////
+        /////////////////////////////////////////////////////////////////////////
 
-        // // cleanup
+        // cleanup
         delete[] work;
         delete[] W;
         delete[] C;
