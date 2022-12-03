@@ -9,7 +9,7 @@ LDFLAGS = -lm -lpthread -lz -ldl -fopenmp -llapack
 all: pca_seq pca_omp
 
 pca_seq: pca_seq.o
-	$(CC) -o $@ $@.o $(OBJECTS) $(LDFLAGS) $(MKL_SERIAL_LINK) $(LDFLAGS)
+	$(CC) -o $@ $@.o $(OBJECTS) $(LDFLAGS) $(MKL_SERIAL_LINK) 
 
 pca_seq.o: pca.cpp
 	$(CC) $(CFLAGS) -o pca_seq.o -c pca.cpp
