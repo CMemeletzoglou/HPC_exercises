@@ -2,3 +2,6 @@
 *.dat
 *.bin
 *.m~
+*.vscode/
+*.jpg
+*.gz
