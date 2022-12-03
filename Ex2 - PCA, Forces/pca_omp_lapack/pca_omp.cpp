@@ -190,15 +190,17 @@ int main(int argc, char **argv)
         // pixel_{i,j} = I[i*n + j], where 0 <= i < m and 0 <= j < n.
         ///////////////////////////////////////////////////////////////////////////
         double *I = read_gzfile(inp_filename, m, n, m, n);
+        // __attribute__((aligned(64))) double *I = read_gzfile(inp_filename, m, n, m, n);
 
         // The algorithm works by processing the matrix data in a **columnwise** manner.
         // A = transpose(I), so image features (columns) are stored in rows.  More
         // efficient to work with the data in this layout.
         double *A = new (std::nothrow) double[n*m];
+        // __attribute__((aligned(64))) double *A = new (std::nothrow) double[n*m];
         assert(A != NULL);
 
         // get each column vector of I and store it as a row vector of A
-        #pragma omp parallel for // TODO (?): if(m > 7)
+        #pragma omp parallel for schedule(static) // static seems to consume less clocks
         for (int i = 0; i < n; i++) 
         {
                 for (int j = 0; j < m; j++)
@@ -233,7 +235,7 @@ int main(int argc, char **argv)
         assert(AMean != NULL);
         assert(AStd  != NULL);
         
-        #pragma omp parallel for schedule(dynamic, 1) //??
+        #pragma omp parallel for schedule(dynamic, 1) // dynamic ?
         for (int i = 0; i < n; i++)
         {
                 // TODO: compute mean and standard deviation of features of A (**DONE**)
@@ -250,7 +252,12 @@ int main(int argc, char **argv)
                         col_mean += A[i*m+j];
                 }
                 col_mean = col_mean / m; 
-                AMean[i] = col_mean; // TODO(?): maybe we don't need the col_mean intermediate variable
+                /* the intermediate col_mean variable is needed, in order for each thread not
+                 * to "touch" the shared array, AMean, at each of iteration of the inner loop.
+                 * Using the intermediate variable, each thread accumulates the value into it, 
+                 * and the updates the shared array -> smaller false sharing performance penalty
+                 */
+                AMean[i] = col_mean;
 
                 // standard deviation calculation
                 for (int j = 0; j < m; j++)
@@ -262,13 +269,11 @@ int main(int argc, char **argv)
 
         t_elapsed += omp_get_wtime();
         std::cout << "MEAN/STD TIME=" << t_elapsed << " seconds\n";
-        return 0;
         ///////////////////////////////////////////////////////////////////////////
 
         ///////////////////////////////////////////////////////////////////////////
         // TODO: 2.
         t_elapsed = -omp_get_wtime();
-
 
         #pragma omp parallel for schedule(static) //??
         for (int i = 0; i < n; i++)
@@ -321,8 +326,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < n; i++)
         {
                 // C(i,i)  = var(Xi) = AStd[i]^2
-                // C[i * n + i] = 1;
-                // for (int j = i + 1; j < n; j++)
+                C[i * n + i] = 1; // ?
                 for (int j = 0; j < i; j++)
                 {
                         // C(i,j) = C(j,i) = cov(Xi, Xj)
@@ -333,7 +337,6 @@ int main(int argc, char **argv)
         
         t_elapsed += omp_get_wtime();
         std::cout << "C-MATRIX TIME=" << t_elapsed << " seconds\n";
-        return 0;
         ///////////////////////////////////////////////////////////////////////////
 
         ///////////////////////////////////////////////////////////////////////////
@@ -386,6 +389,8 @@ int main(int argc, char **argv)
          */
         const int c_offset = n - npc;
         int c_row = 0;
+
+        #pragma omp parallel for schedule(static)
         for (int i = 0; i < m; i++)
         {
                 // gather the data from the i-th column into the buf buffer
@@ -412,9 +417,14 @@ int main(int argc, char **argv)
 
         double end_t = omp_get_wtime();
         std::cout << "OVERALL TIME=" << end_t - start_t << " seconds\n";
-
+        return 0;
         /////////////////////////////////////////////////////////////////////////
         // TODO: 6
+
+        // ------------------------------------------------------------------------
+        // Reconstruction is not needed in the parallel version !!!!
+        // ------------------------------------------------------------------------
+
         double *Z = new (std::nothrow) double[m*n](); // memory for reconstructed image (init to zero)
         assert(Z != NULL);
 
