@@ -45,6 +45,7 @@ void computeGravitationalForcesFast(Particles& particles)
 			 *    1    |    0    |    1    |    1    -> mask
 			 * multiply(mask, force)
 			 *   Fij   |    0    | Fi(j+2) | Fi(j+3)
+			 * alternatively: Instead of multiply do bitwise and
 			**/
 
 			// Helper register that contains the different j indexes
@@ -89,9 +90,15 @@ void computeGravitationalForcesFast(Particles& particles)
 
 			// Multiply the results with the mask so you make 0 the doubles
 			// inside the AVX register that have i == j
-			_xdiff = _mm256_mul_pd(_xdiff, mask);
-			_ydiff = _mm256_mul_pd(_ydiff, mask);
-			_zdiff = _mm256_mul_pd(_zdiff, mask);
+			// _xdiff = _mm256_mul_pd(_xdiff, mask);
+			// _ydiff = _mm256_mul_pd(_ydiff, mask);
+			// _zdiff = _mm256_mul_pd(_zdiff, mask);
+
+			// Bitwise and the results with the mask so you make 0 the doubles
+			// inside the AVX register that have i == j
+			_xdiff = _mm256_and_pd(_xdiff, mask);
+			_ydiff = _mm256_and_pd(_ydiff, mask);
+			_zdiff = _mm256_and_pd(_zdiff, mask);
 
 			_fxi = _mm256_add_pd(_fxi, _xdiff);
 			_fyi = _mm256_add_pd(_fyi, _ydiff);
