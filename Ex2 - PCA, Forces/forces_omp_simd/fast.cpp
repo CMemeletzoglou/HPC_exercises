@@ -33,7 +33,7 @@ void computeGravitationalForcesFast(Particles& particles)
 	__m256d _g_const = _mm256_set1_pd(G);
 
 	#pragma omp parallel for
-	for (int i=0; i<particles.n; i++)
+	for (int i = 0; i < particles.n; i++)
 	{
 		// load current particle's xyz coordinates and mass
 		__m256d _xi = _mm256_set1_pd(particles.x[i]); 
