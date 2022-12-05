@@ -1,57 +1,30 @@
 #include <cmath>
-#include <immintrin.h>
+#include <x86intrin.h> // x86 Intrinsic functions, contains the headers needed for each microarchitecture
 #include <omp.h>
+#include <cstring> // memcpy
 
 #include "particles.h"
 #include "utils.h"
 
-// C
-#include <stdio.h>
-#include <cstring>
-
-// static void print_avx_hex(const char * label, __m256d v)
-// {
-// 	std::cout << std::endl;
-//     double a[4];
-//     _mm256_storeu_pd((double *)a, v);
-// 	for (int i = 0; i < 4; i++)
-// 		std::cout << label << "[" << i << "] = " << std::hex << a[i] << std::endl;
-// }
-
-//  uint8_t a[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
-
-//     __m128i v = _mm_loadu_si128((__m128i *)a);
-
-//     printf("v = %#vx\n", v);
-//     printf("v = %#vhx\n", v);
-//     printf("v = %#vlx\n", v);
-
+// Helper function to print the contents of a 256-bit AVX register
 static void print_avx(const char * label, __m256d v)
 {
 	std::cout << std::endl;
 	__attribute__((aligned(32))) double a[4];
-	// _mm256_storeu_pd((double *)a, v); // MEM[mem_addr+255:mem_addr] := b[255:0] 
-		// a[0] = 3 a[1] = 2 a[2] = 1 a[3] = 0
 	std::cout << label << ":\t" << "\n";
-	// for (int i = 3; i >= 0; i--)
-	// 	std::cout << a[i] << '\t';
 
 	memcpy(a, &v, sizeof(a));
 
 	for (int i = 0; i < 4; i++)
 		std::cout << a[i] << '\t';
 
-	// for(int i=3; i >= 0; i--)
-	// 	// printf("element %d = %f\n", abs((i - 3) % 4), a[i]);
-	// 	std::cout << label << "[" << abs((i - 3) % 4) << "] = " << a[i] << std::endl;
-
 	std::cout << '\n';
 }
 
-/**
+/*
  * Compute the gravitational forces in the system of particles
  * Use AVX and OpenMP to speed up computation
-**/
+ */
 void computeGravitationalForcesFast(Particles& particles)
 {
 	int ndiv4 = particles.n / 4;
@@ -62,13 +35,13 @@ void computeGravitationalForcesFast(Particles& particles)
 	#pragma omp parallel for
 	for (int i=0; i<particles.n; i++)
 	{
-		// load current particle
-		__m256d _xi = _mm256_set1_pd(particles.x[i]); // pi_x|pi_x|pi_x|pi_x
+		// load current particle's xyz coordinates and mass
+		__m256d _xi = _mm256_set1_pd(particles.x[i]); 
 		__m256d _yi = _mm256_set1_pd(particles.y[i]);
 		__m256d _zi = _mm256_set1_pd(particles.z[i]);
 		__m256d _mi = _mm256_set1_pd(particles.m[i]);
 
-		// initialize the AVX registers to store the sum of forces foreach dimension
+		// initialize the AVX registers that will store the sum of forces for each dimension
 		__m256d _fxi = _mm256_setzero_pd();
 		__m256d _fyi = _mm256_setzero_pd();
 		__m256d _fzi = _mm256_setzero_pd();
@@ -78,37 +51,51 @@ void computeGravitationalForcesFast(Particles& particles)
 
 		for (int j = 0; j < 4*ndiv4 ; j+=4)
 		{
-			/* 
-			* The idea of how to use a mask to zero out the forces that are calculated when i == j.
-			* There is no way to avoid calculating them, since vectorization loads the values of
-			* consecutive memory addresses to the registers.
-			* There is also no other way to find if i is in [j,j+3], since we also want to know
-			* which double inside the AVX register, is the one who corresponds to i == j.
-			*    i    |    i    |    i    |    i 
-			*    j    |   j+1   |   j+2   |   j+3 
-			* compare not equal
-			*    1    |    0    |    1    |    1    -> mask
-			* multiply(mask, force)
-			*   Fij   |    0    | Fi(j+2) | Fi(j+3)
-			* alternatively: Instead of multiply do bitwise and
-			*/
+			/* With the outer (i-loop) we choose a current particle and with the inner
+			 * (j-loop) we choose a group of 4 particles, that will be used to compute
+			 * the force exerted by them onto the i-th particle. 
+			 * 
+			 * In the original version (vanilla.cpp), an if statement is used in order to
+			 * avoid computing the force exerted by particle i onto itself. 
+			 
+			 * However, when performing SIMD operations, we use consecutive elements
+			 * and thus, we cannot "skip" some elements. 
+			 * Therefore, we cannot avoid calculating the force exerted by
+			 * particle i, onto itself.
+			 * 
+			 * Thus, we don't need that value, we are going to "mask" it out, using the 
+			 * 256-bit value returned by _mm256_cmp_pd, since there is no other way
+			 * to find if i is in [j,j+3].
+			 * In order to have an equivalent of the "if(i !=j)" of the vanilla code,
+			 * we will compare the values of two 256-bit registers, one loaded the value
+			 * of i (reg. _i) and one loaded with the next *4* values of j (reg. _j).
+			 * We, then, check if two 64-bit (double) elements, of the two registers, are different.
+			 * In the register positions where this is true, the output mask contains 
+			 * 0xFFFF...FF and 0, otherwise. 
+			 * 
+			 * The 256-bit return value of _mm256_cmp_pd, will only be zero in **one** position,
+			 * the position where i == j. This position indicates the calculated force that must
+			 * be ignored, as it corresponds to the force exerted by particle i onto itself.
+			 * We mask out this force, by performing a bitwise AND operation between the contents
+			 * of the register containing the calculated forces and the mask returned by _mm256_cmp_pd.
+			 * 
+			 * 		For example:
+			 * 	
+			 *    i    |    i    |    i    |    i 
+			 *    j    |   j+1   |   j+2   |   j+3 
+			 *
+			 * 		compare not equal
+			 * 	
+			 *    0    |    1    |    1    |    1    -> AND mask
+			 *
+			 *    0    | Fi(j+1) | Fi(j+2) | Fi(j+3)
+			 */
 
 			// Helper register that contains the different j indexes
-			__m256d _j = _mm256_setr_pd(j, j+1, j+2, j+3); // 3 2 1 0
-			// print_avx("j", _j);
-			__m256d mask = _mm256_cmp_pd(_i, _j, _CMP_NEQ_OQ); // 1|1|1|0
-			// print_avx("mask", mask);
+			__m256d _j = _mm256_set_pd(j+3, j+2, j+1, j); 
+			__m256d _mask = _mm256_cmp_pd(_i, _j, _CMP_NEQ_OQ); // mask register
 
-			// printf("particles[%d] = %f\n", j, (double)particles.x[j]);
-			// printf("particles[%d] = %f\n", j+1, (double)particles.x[j+1]);
-			// printf("particles[%d] = %f\n", j+2, (double)particles.x[j+2]);
-			// printf("particles[%d] = %f\n", j+3, (double)particles.x[j+3]);
-
-			// print_avx("_x", _x);
-			// return;
-
-			// load 4 particles dst[255:0] := MEM[mem_addr+255:mem_addr]
-			// memory: x0 x1 x2 x3    -> loaded as seen, x0|x1|x2|x3
+			// load the next 4 particles
 			__m256d _x = _mm256_load_pd(&particles.x[j]); 			
 			__m256d _y = _mm256_load_pd(&particles.y[j]);
 			__m256d _z = _mm256_load_pd(&particles.z[j]);
@@ -124,30 +111,32 @@ void computeGravitationalForcesFast(Particles& particles)
 			__m256d _ypow2 = _mm256_mul_pd(_ydiff, _ydiff);
 			__m256d _zpow2 = _mm256_mul_pd(_zdiff, _zdiff);
 
-			// Calculate ||ri - rj||^3
-			// = sqrt((xi-xj)^2 + (yi-yj)^2 + (zi-zj)^2)^3
-			// = sqrt(_xpow2 + _ypow2 + _zpow2)^3
-			// = sqrt(_xpow2 + _ypow2 + _zpow2) * (_xpow2 + _ypow2 + _zpow2)
+			/* Calculate ||ri - rj||^3 as:
+			 * first compute : sqrt( (xi-xj)^2 + (yi-yj)^2 + (zi-zj)^2 )^3, using :
+			 * sqrt(_xpow2 + _ypow2 + _zpow2)^3, using :
+			 * sqrt(_xpow2 + _ypow2 + _zpow2) * (_xpow2 + _ypow2 + _zpow2)
+			 */
 			__m256d _tmp = _mm256_add_pd(_xpow2, _ypow2);
 			_tmp = _mm256_add_pd(_tmp, _zpow2);
 			__m256d _tmp_sqrt = _mm256_sqrt_pd(_tmp);
 			_tmp = _mm256_mul_pd(_tmp, _tmp_sqrt);
 
-			// print_avx("_tmp", _tmp);
-
 			// Calculate force's magnitude (Fij)
 			__m256d _magnitude = _mm256_mul_pd(_mi, _mj);
 			_magnitude = _mm256_mul_pd(_magnitude, _g_const);
-			_magnitude = _mm256_div_pd(_magnitude, _tmp); // zero
+			_magnitude = _mm256_div_pd(_magnitude, _tmp); 
 
-			// print_avx("_magnitude", _magnitude);
-			
-			// Bitwise and the results with the mask so you make 0 the doubles
-			// inside the AVX register that have i == j
-			_magnitude = _mm256_and_pd(_magnitude, mask);
+			/* Perform the bitwise AND between the 4 computed forces and the mask
+			 * returned by the earlier execution of the _mm256_cmp_pd() function.
+			 * This will zero-out the magnitude of the force of particle i onto
+			 * itself.
+			 */
+			_magnitude = _mm256_and_pd(_magnitude, _mask);
 
-			// Accumulate the forces (for each coordinate) to the AVX
-			// registers that contain the forces calculated by previous iterations of th j-indexed for loop 
+			/* Accumulate the forces (for each coordinate) to the AVX
+			 * registers that contain the forces calculated by previous iterations
+			 * of the j-indexed for loop 
+			 */ 
 			_xdiff = _mm256_mul_pd(_xdiff, _magnitude);
 			_ydiff = _mm256_mul_pd(_ydiff, _magnitude);
 			_zdiff = _mm256_mul_pd(_zdiff, _magnitude);
@@ -165,7 +154,7 @@ void computeGravitationalForcesFast(Particles& particles)
 		// Handle remaining entries
 		for (int j = ndiv4 * 4; j < particles.n; j++)
 		{
-			if (i!=j)
+			if (i!=j) // "vanilla" code
 			{
 				double tmp = pow(particles.x[i]-particles.x[j], 2.0) +
 							pow(particles.y[i]-particles.y[j], 2.0) +
