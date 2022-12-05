@@ -29,19 +29,21 @@
 static void print_avx(const char * label, __m256d v)
 {
 	std::cout << std::endl;
-	double a[4];
+	__attribute__((aligned(32))) double a[4];
 	// _mm256_storeu_pd((double *)a, v); // MEM[mem_addr+255:mem_addr] := b[255:0] 
 		// a[0] = 3 a[1] = 2 a[2] = 1 a[3] = 0
-	// std::cout << label << ":\t" << "\n";
+	std::cout << label << ":\t" << "\n";
 	// for (int i = 3; i >= 0; i--)
 	// 	std::cout << a[i] << '\t';
 
 	memcpy(a, &v, sizeof(a));
 
-	for(int i=3; i >= 0; i--)
-		// printf("element %d = %f\n", abs((i - 3) % 4), a[i]);
-		std::cout << label << "[" << abs((i - 3) % 4) << "] = " << a[i] << std::endl;
+	for (int i = 0; i < 4; i++)
+		std::cout << a[i] << '\t';
 
+	// for(int i=3; i >= 0; i--)
+	// 	// printf("element %d = %f\n", abs((i - 3) % 4), a[i]);
+	// 	std::cout << label << "[" << abs((i - 3) % 4) << "] = " << a[i] << std::endl;
 
 	std::cout << '\n';
 }
@@ -52,11 +54,10 @@ static void print_avx(const char * label, __m256d v)
 **/
 void computeGravitationalForcesFast(Particles& particles)
 {
-	const double G = 6.67408e-11;
-
-	__m256d _g_const = _mm256_set1_pd(G);
-
 	int ndiv4 = particles.n / 4;
+
+	const double G = 6.67408e-11;
+	__m256d _g_const = _mm256_set1_pd(G);
 
 	for (int i=0; i<particles.n; i++)
 	{
@@ -77,40 +78,37 @@ void computeGravitationalForcesFast(Particles& particles)
 		for (int j = 0; j < 4*ndiv4 ; j+=4)
 		{
 			/* 
-			 * The idea of how to use a mask to zero out the forces that are calculated when i == j.
-			 * There is no way to avoid calculating them, since vectorization loads the values of
-			 * consecutive memory addresses to the registers.
-			 * There is also no other way to find if i is in [j,j+3], since we also want to know the
-			 * which double inside the AVX register has i == j.
-			 *    i    |    i    |    i    |    i 
-			 *    j    |   j+1   |   j+2   |   j+3 
-			 * compare not equal
-			 *    1    |    0    |    1    |    1    -> mask
-			 * multiply(mask, force)
-			 *   Fij   |    0    | Fi(j+2) | Fi(j+3)
-			 * alternatively: Instead of multiply do bitwise and
-			 */
+			* The idea of how to use a mask to zero out the forces that are calculated when i == j.
+			* There is no way to avoid calculating them, since vectorization loads the values of
+			* consecutive memory addresses to the registers.
+			* There is also no other way to find if i is in [j,j+3], since we also want to know
+			* which double inside the AVX register, is the one who corresponds to i == j.
+			*    i    |    i    |    i    |    i 
+			*    j    |   j+1   |   j+2   |   j+3 
+			* compare not equal
+			*    1    |    0    |    1    |    1    -> mask
+			* multiply(mask, force)
+			*   Fij   |    0    | Fi(j+2) | Fi(j+3)
+			* alternatively: Instead of multiply do bitwise and
+			*/
 
 			// Helper register that contains the different j indexes
-			__m256d _j = _mm256_set_pd(j, j+1, j+2, j+3); // 0 1 2 3
-			// print_avx("_j", _j);
-			__m256d mask = _mm256_cmp_pd(_i, _j, _CMP_NEQ_OQ); // 0 -nan -nan -nan
+			__m256d _j = _mm256_setr_pd(j, j+1, j+2, j+3); // 3 2 1 0
+			// print_avx("j", _j);
+			__m256d mask = _mm256_cmp_pd(_i, _j, _CMP_NEQ_OQ); // 1|1|1|0
 			// print_avx("mask", mask);
 
+			// printf("particles[%d] = %f\n", j, (double)particles.x[j]);
+			// printf("particles[%d] = %f\n", j+1, (double)particles.x[j+1]);
+			// printf("particles[%d] = %f\n", j+2, (double)particles.x[j+2]);
+			// printf("particles[%d] = %f\n", j+3, (double)particles.x[j+3]);
+
+			// print_avx("_x", _x);
+			// return;
+
 			// load 4 particles dst[255:0] := MEM[mem_addr+255:mem_addr]
-			// memory: x0 x1 x2 x3    x3 x2 x1 x0
-			__m256d _x = _mm256_load_pd(&particles.x[j]); // x3 x2 x1 x0
-
-			std::cout << "TETESDFAS " << ((double*)&_x)[3] << std::endl;
-			printf("particles[%d] = %f\n", j, (double)particles.x[j]);
-			printf("particles[%d] = %f\n", j+1, (double)particles.x[j+1]);
-			printf("particles[%d] = %f\n", j+2, (double)particles.x[j+2]);
-			printf("particles[%d] = %f\n", j+3, (double)particles.x[j+3]);
-
-			print_avx("_x", _x);
-			return;
-
-			
+			// memory: x0 x1 x2 x3    -> loaded as seen, x0|x1|x2|x3
+			__m256d _x = _mm256_load_pd(&particles.x[j]); 			
 			__m256d _y = _mm256_load_pd(&particles.y[j]);
 			__m256d _z = _mm256_load_pd(&particles.z[j]);
 			__m256d _mj = _mm256_load_pd(&particles.m[j]);
@@ -147,8 +145,6 @@ void computeGravitationalForcesFast(Particles& particles)
 			// inside the AVX register that have i == j
 			_magnitude = _mm256_and_pd(_magnitude, mask);
 
-			
-
 			// Accumulate the forces (for each coordinate) to the AVX
 			// registers that contain the forces calculated by previous iterations of th j-indexed for loop 
 			_xdiff = _mm256_mul_pd(_xdiff, _magnitude);
@@ -160,21 +156,28 @@ void computeGravitationalForcesFast(Particles& particles)
 			_fzi = _mm256_add_pd(_fzi, _zdiff);
 		}
 
-		for (int i = ndiv4 * 4; i < particles.n; i++)
-		{
-			// TODO
-		}
-
-		// TODO: Handle remaining entries
-
 		// Manual reduction of each AVX vector (one for every coordinate) to a single double value
 		particles.fx[i] += ((double *)&_fxi)[0] + ((double *)&_fxi)[1] + ((double *)&_fxi)[2] + ((double *)&_fxi)[3];
 		particles.fy[i] += ((double *)&_fyi)[0] + ((double *)&_fyi)[1] + ((double *)&_fyi)[2] + ((double *)&_fyi)[3];
 		particles.fz[i] += ((double *)&_fzi)[0] + ((double *)&_fzi)[1] + ((double *)&_fzi)[2] + ((double *)&_fzi)[3];
-	}
 
-	
-	
+		// Handle remaining entries
+		for (int j = ndiv4 * 4; j < particles.n; j++)
+		{
+			if (i!=j)
+			{
+				double tmp = pow(particles.x[i]-particles.x[j], 2.0) +
+							pow(particles.y[i]-particles.y[j], 2.0) +
+							pow(particles.z[i]-particles.z[j], 2.0);
+
+				double magnitude = G * particles.m[i] * particles.m[j] / pow(tmp, 1.5);
+
+				particles.fx[i] += (particles.x[i]-particles.x[j]) * magnitude;
+				particles.fy[i] += (particles.y[i]-particles.y[j]) * magnitude;
+				particles.fz[i] += (particles.z[i]-particles.z[j]) * magnitude;
+			}
+		}
+	}
 }
 
 int main()
