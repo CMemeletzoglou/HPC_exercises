@@ -59,6 +59,7 @@ void computeGravitationalForcesFast(Particles& particles)
 	const double G = 6.67408e-11;
 	__m256d _g_const = _mm256_set1_pd(G);
 
+	#pragma omp parallel for
 	for (int i=0; i<particles.n; i++)
 	{
 		// load current particle
