@@ -21,7 +21,7 @@ pca_omp.o: pca_omp.cpp
 	$(CC) $(CFLAGS) -fopenmp -o pca_omp.o -c pca_omp.cpp
 
 run_elvis:
-	./pca_seq -m 496 -n 700 -npc 50 -if ../pca_data/elvis.bin.gz -of elvis.50.bin
+	./pca_seq -m 469 -n 700 -npc 50 -if ../pca_data/elvis.bin.gz -of elvis.50.bin
 
 run_cyclone:
 	./pca_seq -m 4096 -n 4096 -npc 50 -if ../pca_data/cyclone.bin.gz -of cyclone.50.bin
