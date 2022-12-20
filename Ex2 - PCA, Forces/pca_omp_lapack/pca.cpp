@@ -11,9 +11,11 @@
 #include <zlib.h>
 
 // interface for LAPACK routines.
-#include <lapack.h>
+// #include <lapack.h>
 
 #include <iomanip> 
+
+extern "C" void dsyev_( char* jobz, char* uplo, int* n, double* a, int* lda, double* w, double* work, int* lwork, int* info, size_t *p1, size_t *p2 );
 
 /////////////////////////////////////////////////////////////////////////////////
 // helpers
@@ -336,9 +338,10 @@ int main(int argc, char **argv)
 
         // see also for the interface to dsyev_():
         // http://www.netlib.org/lapack/explore-html/d2/d8a/group__double_s_yeigen_ga442c43fca5493590f8f26cf42fed4044.html#ga442c43fca5493590f8f26cf42fed4044
-        const char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
-        const char uplo = 'U'; // TODO: how did you compute the (symmetric) covariance matrix?
+        char jobz = 'V'; // TODO: compute both, eigenvalues and orthonormal eigenvectors
+        char uplo = 'U'; // TODO: how did you compute the (symmetric) covariance matrix?
         int info, lwork;
+        size_t dsyev_size = 1;
 
         double *W = new (std::nothrow) double[n]; // eigenvalues
         assert(W != NULL);
@@ -348,7 +351,7 @@ int main(int argc, char **argv)
 
         // first call to dsyev_() with lwork = -1 to determine the optimal workspace (cheap call)
         lwork = -1;      
-        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
+        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, &dsyev_size, &dsyev_size);
 
         lwork = (int)work[0];
         delete[] work;
@@ -358,7 +361,7 @@ int main(int argc, char **argv)
         assert(work != NULL);
 
         // second call to dsyev_(), eigenvalues and eigenvectors are computed here
-        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, 1, 1);
+        dsyev_(&jobz, &uplo, &n, C, &n, W, work, &lwork, &info, &dsyev_size, &dsyev_size);
 
         t_elapsed += omp_get_wtime();
         std::cout << "DSYEV TIME=" << t_elapsed << " seconds\n";
