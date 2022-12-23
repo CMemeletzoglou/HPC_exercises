@@ -277,7 +277,7 @@ int main(int argc, char **argv)
         // TODO: 2.
         t_elapsed = -omp_get_wtime();
 
-        #pragma omp parallel for schedule(static) //??
+        // #pragma omp parallel for collapse(2) schedule(static)
         for (int i = 0; i < n; i++)
         {
                 for (int j = 0; j < m; j++)
@@ -383,8 +383,6 @@ int main(int argc, char **argv)
         double *PCReduced = new (std::nothrow) double[m*npc](); // Initializes memory to 0
         assert(PCReduced != NULL);
 
-        double *buf = new (std::nothrow) double[n];
-        assert(buf != NULL);
 
         // TODO: compute the principal components
         /* Note: dsyev_ returns the eigenvectors in a form of matrix, where each **row**
@@ -393,24 +391,29 @@ int main(int argc, char **argv)
         const int c_offset = n - npc;
         int c_row = 0;
 
-        #pragma omp parallel for schedule(static)
-        for (int i = 0; i < m; i++)
+        #pragma omp parallel 
         {
-                // gather the data from the i-th column into the buf buffer
-                cp_column_in_buffer(A, n, m, i, buf);
-                
-                // pick a principal component (i.e an eigenvector = row vector of C)
-                for (int pc = 0; pc < npc; pc++) // keep the first npc principal components
+                double *buf = new (std::nothrow) double[n];
+                assert(buf != NULL);
+         
+                #pragma omp for schedule(static)
+                for (int i = 0; i < m; i++)
                 {
-                        c_row = c_offset + pc;
+                        // gather the data from the i-th column into the buf buffer
+                        cp_column_in_buffer(A, n, m, i, buf);
                         
-                        for(int j=0; j<n; j++) // iterate through the eigenvector
-                                PCReduced[i* npc + pc] += buf[j] * C[c_row * n + j];
+                        // pick a principal component (i.e an eigenvector = row vector of C)
+                        for (int pc = 0; pc < npc; pc++) // keep the first npc principal components
+                        {
+                                c_row = c_offset + pc;
+                                
+                                for(int j=0; j<n; j++) // iterate through the eigenvector
+                                        PCReduced[i* npc + pc] += buf[j] * C[c_row * n + j];
+                        }
                 }
+
+                delete[] buf;
         }
-
-        delete[] buf;
-
         // TODO: Report the compression ratio
         std::cout << "COMPRESSION RATIO=" << std::setprecision(4) <<  ((double)(n - npc)/n)  * 100 << "%\n";
 
