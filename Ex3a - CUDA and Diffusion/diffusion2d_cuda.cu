@@ -16,7 +16,51 @@ static const int diffusion_block_y = 16;
 __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, int N)
 {
         // TODO: compute rho_out i, j
+        int thread_x = blockIdx.x * diffusion_block_x + threadIdx.x;
+        int thread_y = blockIdx.y * diffusion_block_y + threadIdx.y;
+
+        // thread (thread_x, thread_y) of block(blockIdx.x, blockIdx.y)
+        // will update rho_(thread_x, thread_y)
+        
+        if(thread_x < N && thread_y < N) // don't go out of bounds
+        {
+                // rho_tmp[i*N_ + j] =
+                //                         rho_[i*N_ + j]
+                //                         +
+                //                         fac_
+                //                         *
+                //                         (
+                //                                 (j == N_-1 ? 0 : rho_[i*N_ + (j+1)])
+                //                                 +
+                //                                 (j == 0 ? 0 : rho_[i*N_ + (j-1)])
+                //                                 +
+                //                                 (i == N_-1 ? 0 : rho_[(i+1)*N_ + j])
+                //                                 +
+                //                                 (i == 0 ? 0 : rho_[(i-1)*N_ + j])
+                //                                 -
+                //                                 4*rho_[i*N_ + j]
+                //                         );
+                //         }
+                
+                rho_out[thread_y * N + thread_x] =
+                                        rho[thread_y * N + thread_x]
+                                        +
+                                        fac
+                                        *
+                                        (
+                                                (thread_x == N-1 ? 0 : rho[thread_y * N + (thread_x + 1)])
+                                                +
+                                                (thread_x == 0 ? 0 : rho[thread_y * N + (thread_x - 1)])
+                                                +
+                                                (thread_y == N-1 ? 0 : rho[(thread_y + 1) * N + thread_x])
+                                                +
+                                                (thread_y == 0 ? 0 : rho[(thread_y - 1) * N + thread_x])
+                                                -
+                                                4 * rho[thread_y * N + thread_x]
+                                        );
+                }
 }
+
 
 class Diffusion2D
 {
@@ -57,6 +101,8 @@ class Diffusion2D
                 {
                         // TODO: Get data (rho_) from the GPU device
 
+                        cudaMemcpy(&rho_[0], d_rho_, N_tot * sizeof(float), cudaMemcpyDeviceToHost);
+
                         float sum = 0;
 
                         for(size_type i = 0; i < N_; ++i)
@@ -92,6 +138,7 @@ class Diffusion2D
 void Diffusion2D::WriteDensity(const std::string file_name) const
 {
         // TODO: Get data (rho_) from the GPU device
+        cudaMemcpy(&rho_[0], d_rho_, N_tot * sizeof(float), cudaMemcpyDeviceToHost);
 
         std::ofstream out_file;
         out_file.open(file_name.c_str(), std::ios::out);
@@ -117,9 +164,14 @@ void Diffusion2D::PropagateDensity(int steps)
 
         // TODO: define grid_size and block_size
 
-        for(int s = 0; s < steps; ++s)
+        // each thread block is a 16x16 2d array, i.e. each thread block contains 256 threads
+        dim3 block_dim(diffusion_block_x, diffusion_block_y, 1);
+
+        dim3 grid_size(N_ / diffusion_block_x, N_ / diffusion_block_y, 1);
+
+        for (int s = 0; s < steps; ++s)
         {
-                diffusion_kernel<<< ... , ... >>>(d_rho_tmp_, d_rho_, fac_, N_);
+                diffusion_kernel<<<grid_size, block_dim>>>(d_rho_tmp_, d_rho_, fac_, N_);
                 swap(d_rho_, d_rho_tmp_);
                 time_ += dt_;
         }
