@@ -96,15 +96,15 @@ void computeGravitationalForcesFast(Particles& particles)
 			__m256d _mask = _mm256_cmp_pd(_i, _j, _CMP_NEQ_OQ); // mask register
 
 			// load the next 4 particles
-			__m256d _x = _mm256_load_pd(&particles.x[j]); 			
-			__m256d _y = _mm256_load_pd(&particles.y[j]);
-			__m256d _z = _mm256_load_pd(&particles.z[j]);
+			__m256d _xj = _mm256_load_pd(&particles.x[j]); 			
+			__m256d _yj = _mm256_load_pd(&particles.y[j]);
+			__m256d _zj = _mm256_load_pd(&particles.z[j]);
 			__m256d _mj = _mm256_load_pd(&particles.m[j]);
 
 			// Calculate ri - rj
-			__m256d _xdiff = _mm256_sub_pd(_xi, _x);
-			__m256d _ydiff = _mm256_sub_pd(_yi, _y);
-			__m256d _zdiff = _mm256_sub_pd(_zi, _z);
+			__m256d _xdiff = _mm256_sub_pd(_xi, _xj);
+			__m256d _ydiff = _mm256_sub_pd(_yi, _yj);
+			__m256d _zdiff = _mm256_sub_pd(_zi, _zj);
 			
 			// Calculate (ri - rj).^2
 			__m256d _xpow2 = _mm256_mul_pd(_xdiff, _xdiff);
