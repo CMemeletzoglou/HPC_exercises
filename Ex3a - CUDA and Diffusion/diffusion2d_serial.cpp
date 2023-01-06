@@ -35,31 +35,31 @@ class Diffusion2D
                         InitializeSystem();
                 }
 
-        ~Diffusion2D()
-        {
-                delete[] rho_;
-                delete[] rho_tmp;
-        }
+                ~Diffusion2D()
+                {
+                        delete[] rho_;
+                        delete[] rho_tmp;
+                }
 
-        void PropagateDensity(int steps);
+                void PropagateDensity(int steps);
 
-        float GetMoment()
-        {
-                float sum = 0;
+                float GetMoment()
+                {
+                        float sum = 0;
 
-                for(size_type i = 0; i < N_; ++i)
-                        for(size_type j = 0; j < N_; ++j)
-                        {
-                                float x = j*dr_ + rmin_;
-                                float y = i*dr_ + rmin_;
-                                sum += rho_[i*N_ + j] * (x*x + y*y);
-                        }
+                        for(size_type i = 0; i < N_; ++i)
+                                for(size_type j = 0; j < N_; ++j)
+                                {
+                                        float x = j*dr_ + rmin_;
+                                        float y = i*dr_ + rmin_;
+                                        sum += rho_[i*N_ + j] * (x*x + y*y);
+                                }
 
-                return dr_*dr_*sum;
-        }
-        float GetTime() const {return time_;}
+                        return dr_*dr_*sum;
+                }
+                float GetTime() const {return time_;}
 
-        void WriteDensity(const std::string file_name) const;
+                void WriteDensity(const std::string file_name) const;
 
         private:
                 void InitializeSystem();
