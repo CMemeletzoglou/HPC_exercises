@@ -21,7 +21,6 @@ __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, 
 class Diffusion2D
 {
         public:
-
                 Diffusion2D(const float D, const float rmax, const float rmin, const size_type N)
                         : D_(D), rmax_(rmax), rmin_(rmin), N_(N), N_tot(N*N), d_rho_(0), d_rho_tmp_(0), rho_(N_tot)
                 {
@@ -35,6 +34,11 @@ class Diffusion2D
                         fac_ = dt_ * D_ / (dr_ * dr_);
 
                         // Allocate memory on Device
+                        cudaMalloc((void **)&d_rho_, N_tot * sizeof(float));
+                        cudaMalloc((void **)&d_rho_tmp_, N_tot * sizeof(float));
+
+                        cudaMemset(d_rho_, 0, N_tot * sizeof(float));
+                        cudaMemset(d_rho_tmp_, 0, N_tot * sizeof(float));
 
                         // TODO: allocate d_rho_ and d_rho_tmp_ on the GPU and set them to zero
 
