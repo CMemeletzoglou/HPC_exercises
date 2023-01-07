@@ -15,33 +15,38 @@ static const int diffusion_block_y = 16;
 
 __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, int N)
 {
-        // TODO: compute rho_out i, j
+        /* In order to efficiently calculate the new values of the rho_ 2D array,
+         * we split the 2D data into small square tiles.
+         * Each square tile is a (diffusion_block_x x diffusion_block_y) array.
+         *
+         * The elements of each tile, will be computed by the threads belonging
+         * to the thread block of the same block coordinates.
+         * 
+         * We use one thread per square tile element (= one data cell of rho_)
+         * Therefore, we need to calculate the global (x,y) coordinates of each thread.
+         * 
+         * To compute the x coordinate of a thread, we calculate blockIdx.x * TILE_WIDTH,
+         * i.e. blockIdx.x * diffusion_block_x, which corresponds to the index of the 
+         * first element inside the corresponding thread block, in the x-"axis".
+         
+         * Then, using threadIdx.x as an offset we "locate" the data cell to be updated
+         * by the current thread.
+         
+         * We calculate the y coordinate of a thread, in the same manner.
+         *
+         * However, since the thread_x coordinate "runs through" a line and the thread_y
+         * coordinate "runs through" a column. 
+         * Therefore, the actual global index pair (x,y) is
+         * (thread_y, thread_x) and **not** (thread_x, thread_y).
+         */
         int thread_x = blockIdx.x * diffusion_block_x + threadIdx.x;
         int thread_y = blockIdx.y * diffusion_block_y + threadIdx.y;
 
-        // thread (thread_x, thread_y) of block(blockIdx.x, blockIdx.y)
-        // will update rho_(thread_x, thread_y)
-        
-        if(thread_x < N && thread_y < N) // don't go out of bounds
+        /* Thread (thread_x, thread_y) of block(blockIdx.x, blockIdx.y)
+         * will update rho_(thread_y, thread_x)
+         */        
+        if(thread_x < N && thread_y < N) // stay inside the N x N array's bounds
         {
-                // rho_tmp[i*N_ + j] =
-                //                         rho_[i*N_ + j]
-                //                         +
-                //                         fac_
-                //                         *
-                //                         (
-                //                                 (j == N_-1 ? 0 : rho_[i*N_ + (j+1)])
-                //                                 +
-                //                                 (j == 0 ? 0 : rho_[i*N_ + (j-1)])
-                //                                 +
-                //                                 (i == N_-1 ? 0 : rho_[(i+1)*N_ + j])
-                //                                 +
-                //                                 (i == 0 ? 0 : rho_[(i-1)*N_ + j])
-                //                                 -
-                //                                 4*rho_[i*N_ + j]
-                //                         );
-                //         }
-                
                 rho_out[thread_y * N + thread_x] =
                                         rho[thread_y * N + thread_x]
                                         +
@@ -58,7 +63,7 @@ __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, 
                                                 -
                                                 4 * rho[thread_y * N + thread_x]
                                         );
-                }
+        }
 }
 
 
@@ -77,14 +82,17 @@ class Diffusion2D
                         /// stencil factor
                         fac_ = dt_ * D_ / (dr_ * dr_);
 
-                        // Allocate memory on Device
+                        /* Allocate global memory on Device
+                         * Since we allocate **global** memory (shared among all GPU threads),
+                         * there is no need to have "ghost cells"
+                         * (i.e. buffers to share data between threads)
+                         */
                         cudaMalloc((void **)&d_rho_, N_tot * sizeof(float));
                         cudaMalloc((void **)&d_rho_tmp_, N_tot * sizeof(float));
 
+                        // set the allocated device memory blocks, to zero
                         cudaMemset(d_rho_, 0, N_tot * sizeof(float));
                         cudaMemset(d_rho_tmp_, 0, N_tot * sizeof(float));
-
-                        // TODO: allocate d_rho_ and d_rho_tmp_ on the GPU and set them to zero
 
                         InitializeSystem();
                 }
@@ -99,8 +107,7 @@ class Diffusion2D
 
                 float GetMoment()
                 {
-                        // TODO: Get data (rho_) from the GPU device
-
+                        // Get data (rho_) from the GPU device
                         cudaMemcpy(&rho_[0], d_rho_, N_tot * sizeof(float), cudaMemcpyDeviceToHost);
 
                         float sum = 0;
@@ -137,7 +144,7 @@ class Diffusion2D
 
 void Diffusion2D::WriteDensity(const std::string file_name) const
 {
-        // TODO: Get data (rho_) from the GPU device
+        // Get data (rho_) from the GPU device
         cudaMemcpy(&rho_[0], d_rho_, N_tot * sizeof(float), cudaMemcpyDeviceToHost);
 
         std::ofstream out_file;
@@ -159,19 +166,35 @@ void Diffusion2D::WriteDensity(const std::string file_name) const
 void Diffusion2D::PropagateDensity(int steps)
 {
         using std::swap;
-        /// Dirichlet boundaries; central differences in space, forward Euler
-        /// in time
+        /// Dirichlet boundaries; central differences in space, forward Euler in time.
 
-        // TODO: define grid_size and block_size
+        // Define grid_size and block_size
 
-        // each thread block is a 16x16 2d array, i.e. each thread block contains 256 threads
-        dim3 block_dim(diffusion_block_x, diffusion_block_y, 1);
+        // Each thread block is a 16x16 2d array, i.e. each thread block contains 256 threads
+        dim3 block_size(diffusion_block_x, diffusion_block_y, 1);
 
+        /* Each grid is a 2d array of thread blocks.
+         * The grid's dimensions are (N_ / diffusion_block_x) x (N_ / diffusion_block_y).
+         * Therefore, we seperate the total N_ x N_ array, into grids with the formentioned dimensions.
+         * Also, the total number of threads blocks is again (N_ / diffusion_block_x) x (N_ / diffusion_block_y).
+         */
         dim3 grid_size(N_ / diffusion_block_x, N_ / diffusion_block_y, 1);
 
         for (int s = 0; s < steps; ++s)
         {
-                diffusion_kernel<<<grid_size, block_dim>>>(d_rho_tmp_, d_rho_, fac_, N_);
+                /* Kernel launch using the defined grid_size and block_size dim3 variables
+                 * in the execution configuration.
+                 */
+                diffusion_kernel<<<grid_size, block_size>>>(d_rho_tmp_, d_rho_, fac_, N_);    
+                
+                /* Swap the addresses where the device memory pointers point to 
+                 * (**NOT** the respective memory blocks' contents).
+                 * The pointer swap is performed on the CPU.
+                 * However, these pointers point to device memory,
+                 * hence they cannot be dereferenced by Host code.
+                 * On the next kernel launch, the GPU code will "see"
+                 * the changes made by std::swap.
+                 */            
                 swap(d_rho_, d_rho_tmp_);
                 time_ += dt_;
         }
@@ -184,6 +207,7 @@ void Diffusion2D::InitializeSystem()
         /// initialize rho(x,y,t=0)
         float bound = 1./2;
 
+        // Initialize the N x N array (this happens on CPU memory)
         for(size_type i = 0; i < N_; ++i)
         {
                 for(size_type j = 0; j < N_; ++j)
@@ -198,7 +222,7 @@ void Diffusion2D::InitializeSystem()
                         }
                 }
         }
-        // TODO: Copy data to the GPU device
+        // Copy the initialized N x N array to the GPU device
         cudaMemcpy(d_rho_, &rho_[0], rho_.size() * sizeof(float), cudaMemcpyHostToDevice);
 }
 
@@ -228,7 +252,7 @@ int main(int argc, char* argv[])
         while(time < tmax)
         {
                 System.PropagateDensity(steps_between_measurements);
-                cudaDeviceSynchronize();
+                cudaDeviceSynchronize(); // wait for the CUDA kernel to finish
                 time = System.GetTime();
                 float moment = System.GetMoment();
                 std::cout << time << '\t' << moment << std::endl;
@@ -240,7 +264,7 @@ int main(int argc, char* argv[])
 
         std::cerr << argv[0] << "\t N=" <<N_ << "\t time=" << elapsed << "s" << std::endl;
 
-        std::string density_file = "Density.dat";
+        std::string density_file = "Density_cuda.dat";
         System.WriteDensity(density_file);
 
         return 0;

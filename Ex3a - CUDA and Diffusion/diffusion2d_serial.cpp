@@ -187,7 +187,7 @@ int main(int argc, char* argv[])
 
         std::cerr << argv[0] << "\t N=" <<N_ << "\t time=" << elapsed << "s" << std::endl;
 
-        std::string density_file = "Density.dat";
+        std::string density_file = "Density_serial.dat";
         System.WriteDensity(density_file);
 
         return 0;
