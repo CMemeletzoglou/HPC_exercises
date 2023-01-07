@@ -10,62 +10,97 @@
 
 typedef std::size_t size_type;
 
+// used to specify the dimensions of a each Thread Block
 static const int diffusion_block_x = 16;
 static const int diffusion_block_y = 16;
 
 __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, int N)
 {
-        /* In order to efficiently calculate the new values of the rho_ 2D array,
-         * we split the 2D data into small square tiles.
-         * Each square tile is a (diffusion_block_x x diffusion_block_y) array.
+        /* We use a **grid-stride loop** approach (with two nested for loops, one for each grid dimension), 
+         * in order to provide a generic implementation of the CUDA Kernel. 
+         * This is needed to account for the case where the Kernel is launched using a grid whose 
+         * total thread count is less than the total number of data cells (Ntot).
+         * (In the "default" code where we use 16 x 16 Thread Blocks, this is not an issue, however
+         * we chose to implement it, in order to provide a complete solution)
          *
-         * The elements of each tile, will be computed by the threads belonging
-         * to the thread block of the same block coordinates.
-         * 
-         * We use one thread per square tile element (= one data cell of rho_)
-         * Therefore, we need to calculate the global (x,y) coordinates of each thread.
-         * 
-         * To compute the x coordinate of a thread, we calculate blockIdx.x * TILE_WIDTH,
-         * i.e. blockIdx.x * diffusion_block_x, which corresponds to the index of the 
-         * first element inside the corresponding thread block, in the x-"axis".
-         
-         * Then, using threadIdx.x as an offset we "locate" the data cell to be updated
-         * by the current thread.
-         
-         * We calculate the y coordinate of a thread, in the same manner.
+         * We use the variable xstride to calculate the grid-stride loop's x-axis step
+         * (in each grid's x-axis, there are gridDim.x Thread Blocks containing blockDim.x threads).
+         * We calculate the grid-stride loop's y-axis step, in a similar manner.
          *
-         * However, since the thread_x coordinate "runs through" a line and the thread_y
-         * coordinate "runs through" a column. 
-         * Therefore, the actual global index pair (x,y) is
-         * (thread_y, thread_x) and **not** (thread_x, thread_y).
+         * The values of xstride and ystride are used as a grid offset for the calculation of a
+         * thread's global (x,y) index pair (stored in thread_x, thread_y).
+         * 
+         * The "default" code uses a square 2D array of Thread Blocks, where each Thread Block
+         * is a 16 x 16 array of threads. Thus, xstride is equal to ystride. 
+         * We generalize the code by using two separate variables, which allows for a non-square grid.
+         *
+         * Since the xstride variable, "runs through" a line of grids and the ystride "runs through"
+         * a column of grids, we need to use **ystride** as a loop step for the grid-rows and **xstride**
+         * as a loop step for the grid-columns. (Again, in the "default" case this difference does not exist)
          */
-        int thread_x = blockIdx.x * diffusion_block_x + threadIdx.x;
-        int thread_y = blockIdx.y * diffusion_block_y + threadIdx.y;
+        int xstride = gridDim.x * blockDim.x;
+        int ystride = gridDim.y * blockDim.y;
 
-        /* Thread (thread_x, thread_y) of block(blockIdx.x, blockIdx.y)
-         * will update rho_(thread_y, thread_x)
-         */        
-        if(thread_x < N && thread_y < N) // stay inside the N x N array's bounds
+        for(int grid_i = 0; grid_i < N; grid_i+=ystride)
         {
-                rho_out[thread_y * N + thread_x] =
-                                        rho[thread_y * N + thread_x]
-                                        +
-                                        fac
-                                        *
-                                        (
-                                                (thread_x == N-1 ? 0 : rho[thread_y * N + (thread_x + 1)])
-                                                +
-                                                (thread_x == 0 ? 0 : rho[thread_y * N + (thread_x - 1)])
-                                                +
-                                                (thread_y == N-1 ? 0 : rho[(thread_y + 1) * N + thread_x])
-                                                +
-                                                (thread_y == 0 ? 0 : rho[(thread_y - 1) * N + thread_x])
-                                                -
-                                                4 * rho[thread_y * N + thread_x]
-                                        );
+                for(int grid_j = 0; grid_j < N; grid_j+=xstride)
+                {
+                        /* In order to efficiently calculate the new values of the rho_ 2D array,
+                        *  we split the 2D data into small square tiles.
+                        *
+                        * Each square tile is a (diffusion_block_x x diffusion_block_y) array.
+                        * (or a (blockDim.x x blockDim.y) array, since on kernel launch we set
+                        * blockDim.x = diffusion_block_x and blockDim.y = diffusion_block_y)
+                        *
+                        * A data-tile block is updated by the threads of the Thread Block,
+                        * having the same block coordinates as the data-tile block.
+                        * Thus, we use one thread per square tile element (= one data cell of rho_)
+                        *
+                        * Therefore, we need to calculate the global (x,y) coordinates of each thread.
+                        * 
+                        * To compute the x coordinate of a thread, we calculate blockIdx.x * TILE_WIDTH,
+                        * i.e. blockIdx.x * blockDim.x, which corresponds to the index of the 
+                        * first element inside the corresponding Thread Block, in the x-"axis".
+                        *
+                        * Then, using threadIdx.x as an offset we "locate" the data cell to be updated
+                        * by the current thread (that is the case when the grid covers the entire rho_ array).
+                        *
+                        * However, in order to account for the generalized case where the grid is smaller
+                        * than the data-grid, we offset each **global** thread index by the current data-grid
+                        * we are currently acting upon. The first Thread Block of each iteration is at
+                        * position (grid_i, grid_j).
+                        *                        
+                        * We calculate the y coordinate of a thread, in the same manner.
+                        *
+                        * However, since the thread_x coordinate "runs through" a line and the thread_y
+                        * coordinate "runs through" a column, the actual global index pair (x,y) is
+                        * (thread_y, thread_x) and **not** (thread_x, thread_y).
+                        */
+                        int thread_x = grid_j + (blockIdx.x * blockDim.x + threadIdx.x); // column index
+                        int thread_y = grid_i + (blockIdx.y * blockDim.y + threadIdx.y); // row index
+ 
+                        if(thread_x < N && thread_y < N) // stay inside the N x N array's bounds
+                        {
+                                rho_out[thread_y * N + thread_x] =
+                                                        rho[thread_y * N + thread_x]
+                                                        +
+                                                        fac
+                                                        *
+                                                        (
+                                                                (thread_x == N-1 ? 0 : rho[thread_y * N + (thread_x + 1)])
+                                                                +
+                                                                (thread_x == 0 ? 0 : rho[thread_y * N + (thread_x - 1)])
+                                                                +
+                                                                (thread_y == N-1 ? 0 : rho[(thread_y + 1) * N + thread_x])
+                                                                +
+                                                                (thread_y == 0 ? 0 : rho[(thread_y - 1) * N + thread_x])
+                                                                -
+                                                                4 * rho[thread_y * N + thread_x]
+                                                        );
+                        }
+                }
         }
 }
-
 
 class Diffusion2D
 {
@@ -170,10 +205,10 @@ void Diffusion2D::PropagateDensity(int steps)
 
         // Define grid_size and block_size
 
-        // Each thread block is a 16x16 2d array, i.e. each thread block contains 256 threads
+        // Each Thread Block is a 16x16 2d array, i.e. each Thread Block contains 256 threads   
         dim3 block_size(diffusion_block_x, diffusion_block_y, 1);
 
-        /* Each grid is a 2d array of thread blocks.
+        /* Each grid is a 2d array of Thread Blocks.
          * The grid's dimensions are (N_ / diffusion_block_x) x (N_ / diffusion_block_y).
          * Therefore, we seperate the total N_ x N_ array, into grids with the formentioned dimensions.
          * Also, the total number of threads blocks is again (N_ / diffusion_block_x) x (N_ / diffusion_block_y).
@@ -185,7 +220,7 @@ void Diffusion2D::PropagateDensity(int steps)
                 /* Kernel launch using the defined grid_size and block_size dim3 variables
                  * in the execution configuration.
                  */
-                diffusion_kernel<<<grid_size, block_size>>>(d_rho_tmp_, d_rho_, fac_, N_);    
+                diffusion_kernel<<<grid_size, block_size>>>(d_rho_tmp_, d_rho_, fac_, N_);   
                 
                 /* Swap the addresses where the device memory pointers point to 
                  * (**NOT** the respective memory blocks' contents).
