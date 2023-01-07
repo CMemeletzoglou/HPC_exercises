@@ -82,21 +82,21 @@ __global__ void diffusion_kernel(float * rho_out, float const * rho, float fac, 
                         if(thread_x < N && thread_y < N) // stay inside the N x N array's bounds
                         {
                                 rho_out[thread_y * N + thread_x] =
-                                                        rho[thread_y * N + thread_x]
-                                                        +
-                                                        fac
-                                                        *
-                                                        (
-                                                                (thread_x == N-1 ? 0 : rho[thread_y * N + (thread_x + 1)])
-                                                                +
-                                                                (thread_x == 0 ? 0 : rho[thread_y * N + (thread_x - 1)])
-                                                                +
-                                                                (thread_y == N-1 ? 0 : rho[(thread_y + 1) * N + thread_x])
-                                                                +
-                                                                (thread_y == 0 ? 0 : rho[(thread_y - 1) * N + thread_x])
-                                                                -
-                                                                4 * rho[thread_y * N + thread_x]
-                                                        );
+                                        rho[thread_y * N + thread_x]
+                                        +
+                                        fac
+                                        *
+                                        (
+                                                (thread_x == N-1 ? 0 : rho[thread_y * N + (thread_x + 1)])
+                                                +
+                                                (thread_x == 0 ? 0 : rho[thread_y * N + (thread_x - 1)])
+                                                +
+                                                (thread_y == N-1 ? 0 : rho[(thread_y + 1) * N + thread_x])
+                                                +
+                                                (thread_y == 0 ? 0 : rho[(thread_y - 1) * N + thread_x])
+                                                -
+                                                4 * rho[thread_y * N + thread_x]
+                                        );
                         }
                 }
         }
