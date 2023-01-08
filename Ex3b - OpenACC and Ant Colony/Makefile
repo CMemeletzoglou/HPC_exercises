@@ -1,4 +1,4 @@
-CXXFLAGS?= -Wall -O3 -std=c++14
+CXXFLAGS?= -Wall -O3 -std=c++14 -g
 
 
 ant_colony_serial : ant_colony_serial.cpp
