@@ -2,6 +2,8 @@
 #include <tuple>
 #include <vector>
 #include <algorithm>
+#include <string>
+#include <fstream>
 #include "timer.hpp"
 
 typedef struct ant_s
@@ -23,7 +25,9 @@ class AntColonySystem
                 AntColonySystem(const std::size_t N) : N(N), N_tot(N*N)
                 {
                         // allocate memory for the grid
-                        grid = new (std::nothrow) grid_cell_t[N_tot];                        
+                        grid = new (std::nothrow) grid_cell_t[N_tot];
+
+                        initialize_system();
                 }
 
                 ~AntColonySystem()
@@ -34,8 +38,9 @@ class AntColonySystem
 
                 float get_time() const { return curr_time; }
 
-                void advance_system(float time);
+                void advance_system(const int);
 
+                void write_grid_status(const std::string) const;
         private:
                 void initialize_system();
 
@@ -44,13 +49,41 @@ class AntColonySystem
 
                 const std::size_t N, N_tot;
 
-                float curr_time;
+                const float dt = 1e-3; // value (??)
+                float curr_time = 0.0f;
 
                 grid_cell_t *grid;
                 int ant_count = 0;
 
                 std::vector<ant_t> ants;
 };
+
+void AntColonySystem::write_grid_status(const std::string filename) const
+{
+        std::ofstream out_file;
+        out_file.open(filename.c_str(), std::ios::out);
+        if(out_file.good())
+        {
+                for (std::size_t i = 0; i < N; i++)
+                        for (std::size_t j = 0; j < N; j++)
+                                out_file << "Cell[" << i << ", " << j << "] : "
+                                         << "\t"
+                                         << "Pherormone = "
+                                         << grid[i * N + j].pher_amount << "\t\t\t"
+                                         << "Has ant : "
+                                         << grid[i * N + j].ant_present << "\n";
+
+                out_file << "\n\n**************************Ants**************************\n\n";
+
+                for (int i = 0; i < ant_count; i++)
+                        out_file << "Ant " << i << "\t Position : (" << std::get<0>(ants.at(i).position)
+                                 << " ," << std::get<1>(ants.at(i).position) << ")\n";
+
+                out_file << "\nEND GRID STATUS\n\n";
+        }
+
+        out_file.close();
+}
 
 void AntColonySystem::initialize_system()
 {
@@ -59,19 +92,22 @@ void AntColonySystem::initialize_system()
 
         srand(time(NULL));
 
-        for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
+        for (std::size_t i = 0; i < N; i++)
+                for (std::size_t j = 0; j < N; j++)
                 {
                         grid[i * N + j].coords = std::make_tuple(i, j);
                         grid[i * N + j].pher_amount = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
                         grid[i * N + j].ant_present = rand() % 2;
 
-                        /* if the cell has an ant assigned to it, set the ant's coordinates 
+                        /* If the cell has an ant assigned to it, set the ant's coordinates 
                          * to that of the cell
                          */
                         if(grid[i * N + j].ant_present)
                         {
-                                grid[i * N + j].ant.position = std::make_tuple(i, j);
+                                ant_t ant; // create a new ant
+                                ant.position = std::make_tuple(i, j); // add its coordinates
+                                grid[i * N + j].ant = ant; 
+                                ants.emplace_back(ant); // add ant to ants vector
                                 ant_count++;
                         }
                 }
@@ -154,7 +190,7 @@ void AntColonySystem::move_ants()
                                                         {
                                                                 return left.pher_amount < right.pher_amount;
                                                         });
-                        float max_pher = (*max_pher_it).pher_amount;
+                        float max_pher = (*max_pher_it).pher_amount; // probably not needed
                         int max_pher_cell_index = max_pher_it - neigh_cells.begin(); // get the index of the iterator
 
                         // check if the max_pher is empty
@@ -190,8 +226,8 @@ void AntColonySystem::update_pherormone()
         /* Assume that each cell occupied by an ant, gets an pherormone increase of 5%
          * and empty cells lose the 10% of their pherormone amount
          */
-        for (int i = 0; i < N; i++)
-                for (int j = 0; j < N; j++)
+        for (std::size_t i = 0; i < N; i++)
+                for (std::size_t j = 0; j < N; j++)
                         if(grid[i * N + j].ant_present)
                                 grid[i * N + j].pher_amount += 0.05 * grid[i * N + j].pher_amount;
                         else
@@ -199,13 +235,17 @@ void AntColonySystem::update_pherormone()
 
 }
 
-void AntColonySystem::advance_system(float time) // TODO: use the time arg (?)
+void AntColonySystem::advance_system(const int steps)
 {
-        move_ants();
-        //then update the pherormone amounts of each cell (vacated or newly occupied)
+        for (int s = 0; s < steps; s++)
+        {
+                move_ants();
+                //then update the pherormone amounts of each cell (vacated or newly occupied)
+                //update the cells occupied by ants and the empty cells
+                update_pherormone();
 
-        //update the cells occupied by ants and the empty cells
-        update_pherormone();
+                curr_time += dt;
+        }
 }
 
 int main(int argc, char **argv)
@@ -216,8 +256,9 @@ int main(int argc, char **argv)
                 return 1;
         }
 
-        const std::size_t N = 1 << std::atoi(argv[1]);
+        const std::size_t N = 1 << std::atoi(argv[1]); // grid size is 2^argv[1]
         const float tmax = 0.01; // max sim time (value?)
+        const int steps_between_measurements = 100;
 
         // create a N x N AntColonySystem
         AntColonySystem system(N);
@@ -229,10 +270,10 @@ int main(int argc, char **argv)
 
         while(time < tmax)
         {
-                time = system.get_time();
-                
                 // call sim function
-                system.advance_system(time);
+                system.advance_system(steps_between_measurements);
+                // advance time                
+                time = system.get_time();
         }
 
         runtime.stop();
@@ -240,6 +281,9 @@ int main(int argc, char **argv)
         double time_elapsed = runtime.get_timing();
 
         std::cerr << argv[0] << "\t N=" << N << "\t time=" << time_elapsed << "s" << std::endl;
+
+        const std::string ant_grid_filename = "Ant_grid_serial.dat";
+        system.write_grid_status(ant_grid_filename); // write logging data
 
         return 0;
 }
