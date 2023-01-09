@@ -9,7 +9,7 @@
 
 typedef struct ant_s
 {
-        std::tuple<int, int> position;
+        std::tuple<int, int> position; // the ant position's global index
 } ant_t;
 
 typedef struct grid_cell_s
@@ -17,7 +17,6 @@ typedef struct grid_cell_s
         std::tuple<int, int> coords;
         float pher_amount;
         bool ant_present = false;
-        // ant_t ant;
 } grid_cell_t;
 
 class AntColonySystem
@@ -46,6 +45,7 @@ class AntColonySystem
                 void initialize_system();
 
                 void move_ants();
+                int choose_next_cell(const std::vector<grid_cell_t*> &);
                 void update_pherormone();
 
                 const std::size_t N, N_tot;
@@ -68,7 +68,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                         for (std::size_t j = 0; j < N; j++)
                                 out_file << "Cell[" << i << ", " << j << "] : "
                                          << "\t"
-                                         << "Pherormone = "
+                                         << "pheromone = "
                                          << grid[i * N + j].pher_amount << "\t\t\t"
                                          << "Has ant : "
                                          << grid[i * N + j].ant_present << "\n";
@@ -76,8 +76,8 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                 out_file << "\n\n**************************Ants**************************\n\n";
 
                 for (int i = 0; i < ant_count; i++)
-                        out_file << "Ant " << i << "\t Position : (" << std::get<0>(ants.at(i).position)
-                                 << ", " << std::get<1>(ants.at(i).position) << ")\n";
+                        out_file << "Ant " << i << "\t Position : (" << std::get<0>(ants[i].position)
+                                 << ", " << std::get<1>(ants[i].position) << ")\n";
 
                 out_file << "\nEND GRID STATUS\n\n";
         }
@@ -87,11 +87,8 @@ void AntColonySystem::write_grid_status(const std::string filename) const
 
 void AntColonySystem::initialize_system()
 {
-        // assume pherormone is in [0,1], with 0 being completely empty
-        // and 1 corresponding to completely full of pherormone
-
-        srand(time(NULL));
-
+        // assume pheromone is in [0,1], with 0 being completely empty
+        // and 1 corresponding to completely full of pheromone
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
                 {
@@ -108,7 +105,6 @@ void AntColonySystem::initialize_system()
                 {
                         ant_t ant; // create a new ant
                         ant.position = std::make_tuple(rand_i, rand_j); // add its coordinates
-                        // grid[rand_i * N + rand_j].ant = ant; 
                         grid[rand_i * N + rand_j].ant_present = true; 
 
                         ants.emplace_back(ant); // add ant to ants vector
@@ -125,153 +121,133 @@ void AntColonySystem::move_ants()
         /* Assume that an ant can move only in a "cross" fashion, i.e.
          * one cell forward, backward, left, right.
          */
-        std::vector<grid_cell_t> neigh_cells;
-        neigh_cells.reserve(4);
+        std::vector<grid_cell_t*> neigh_cells(4, nullptr);
+        std::vector<int> neigh_cell_idx(4, -1);
+        int num_neigh = 0;
 
-        /* Need to check if an ant has an upper, lower, left or right cell, because
-         * the ants on the grid's boundaries don't have all kinds of neighbors.
-         * 
-         * Solve this using a dummy cell?
-         */
-
-        grid_cell_t dummy_cell;
-        dummy_cell.ant_present = true;
-        dummy_cell.pher_amount = 0.0f;
-        dummy_cell.coords = std::make_tuple(0, 0);
-
-        // iterate for each ant
-        for (int curr_ant = 0; curr_ant < ant_count; curr_ant++)
+        for (int curr_ant = 0; curr_ant < ant_count; curr_ant++) // for each ant
         {
-                neigh_cells = {dummy_cell, dummy_cell, dummy_cell, dummy_cell};
+                num_neigh = 0;
 
-                // get the ant's coordinates
-                int ant_i = std::get<0>(ants.at(curr_ant).position);
-                int ant_j = std::get<1>(ants.at(curr_ant).position);
+                // get the ant's (i, j) coordinate vector
+                int ant_i = std::get<0>(ants[curr_ant].position);
+                int ant_j = std::get<1>(ants[curr_ant].position);
 
-                // std::tuple<int, int> left_cell = std::make_tuple(i, j - 1);
-                // std::tuple<int, int> right_cell = std::make_tuple(i, j + 1);
-                // std::tuple<int, int> up_cell = std::make_tuple(i - 1, j);
-                // std::tuple<int, int> down_cell = std::make_tuple(i + 1, j);
-
-                // need to check for existence of left, right, upper and lower cells
-
+                /* Need to check for existence of left, right, upper and lower cells
+                 * since the ants placed on the grid's boundaries, do not have all
+                 * kinds of neighbors
+                 */
                 if(ant_j - 1 >= 0) // if there exists a left cell
-                        neigh_cells.at(0) = grid[ant_i * N + (ant_j - 1)];
-                if (ant_j + 1 <= static_cast<int>(N) - 1) // if there exists a right cell
-                        neigh_cells.at(1) = grid[ant_i * N + (ant_j + 1)];
-                if (ant_i - 1 >= 0) // if there exists an upper cell
-                        neigh_cells.at(2) = grid[(ant_i - 1) * N + ant_j];
-                if (ant_i + 1 <= static_cast<int>(N) - 1) // if there exists a below cell
-                        neigh_cells.at(3) = grid[(ant_i + 1) * N + ant_j];
-
-                // neigh_cells.emplace_back(grid[ant_i * N + (ant_j - 1)]);     // add left cell
-                // neigh_cells.emplace_back(grid[ant_i * N + (ant_j + 1)]);     // add right cell
-                // neigh_cells.emplace_back(grid[(ant_i - 1) * N + ant_j]);     // add up cell
-                // neigh_cells.emplace_back(grid[(ant_i + 1) * N + ant_j]);     // add down cell
-
-                // check if all of the neighboring cells have the same amount of pherormone
-                if (std::adjacent_find(neigh_cells.begin(), neigh_cells.end(), [](auto const &left, auto const &right)
-                                       { return left.pher_amount != right.pher_amount; }) == neigh_cells.end())
-                                        // comparing floats like that.. not good practice
                 {
-                        /* Helper variables to make the below while loop stop, in case **all**
-                         * of the 4 max pherormone neighboring cells, are occupied
-                         */                        
-                        int occupied_count = 0;
-                        bool ant_moved = false;
-                        while (!ant_moved && occupied_count < 4)
-                        {
-                                // select a random neighboring cell
-                                int rand_index = rand() % neigh_cells.size();
-                                if(neigh_cells.at(rand_index).ant_present == false)
-                                {
-                                        /* Update the pherormone amount on the cell to be
-                                         * vacated (i.e. the ant's current cell)
-                                         */
-                                        float pher_loss = grid[ant_i * N + ant_j].pher_amount / 2;
-                                        // the cell to be vacated loses half of its pherormone
-                                        grid[ant_i * N + ant_j].pher_amount -= pher_loss;
-                                        float pher_incr = pher_loss / 4;
-
-                                        //distribute the pherormone loss, equally to all 4 neighboring cells
-                                        grid[ant_i * N + (ant_j - 1)].pher_amount += pher_incr; // left cell
-                                        grid[ant_i * N + (ant_j + 1)].pher_amount += pher_incr; // right cell
-                                        grid[(ant_i - 1) * N + ant_j].pher_amount += pher_incr; // up cell
-                                        grid[(ant_i + 1) * N + ant_j].pher_amount += pher_incr; // down cell
-
-                                        // vacate previous cell
-                                        grid[ant_i * N + ant_j].ant_present = false;
-                                        // then move the ant
-                                        ants.at(curr_ant).position = neigh_cells.at(rand_index).coords;
-
-                                        int cell_i = std::get<0>(neigh_cells.at(rand_index).coords);
-                                        int cell_j = std::get<1>(neigh_cells.at(rand_index).coords);
-
-                                        // update the cell's status to occupied
-                                        grid[cell_i * N + cell_j].ant_present = true;
-                                        ant_moved = true;
-                                }
-                                else
-                                        occupied_count++;
-                        }
+                        neigh_cell_idx[0] = ant_i * N + (ant_j - 1);
+                        neigh_cells[0] = &(grid[neigh_cell_idx[0]]);
+                        num_neigh++;
                 }
-                else
+                if (ant_j + 1 <= static_cast<int>(N) - 1) // if there exists a right cell
                 {
-                        auto max_pher_it = std::max_element(neigh_cells.begin(), neigh_cells.end(),
-                                                        [](auto const &left, auto const &right)
-                                                        {
-                                                                return left.pher_amount < right.pher_amount;
-                                                        });
-                        float max_pher = (*max_pher_it).pher_amount; // probably not needed
-                        int max_pher_cell_index = max_pher_it - neigh_cells.begin(); // get the index of the iterator
+                        neigh_cell_idx[1] = ant_i * N + (ant_j + 1);
+                        neigh_cells[1] = &(grid[neigh_cell_idx[1]]);
+                        num_neigh++;
+                }                        
+                if (ant_i - 1 >= 0) // if there exists an upper cell
+                {
+                        neigh_cell_idx[2]= (ant_i - 1) * N + ant_j;
+                        neigh_cells[2] = &(grid[neigh_cell_idx[2]]);
+                        num_neigh++;
+                }
+                if (ant_i + 1 <= static_cast<int>(N) - 1) // if there exists a below cell
+                {
+                        neigh_cell_idx[3] = (ant_i + 1) * N + ant_j;
+                        neigh_cells[3] = &(grid[neigh_cell_idx[3]]);
+                        num_neigh++;
+                }
 
-                        // check if the max_pher is empty
-                        if(neigh_cells.at(max_pher_cell_index).ant_present == false)
-                        {
-                                /* Update the pherormone amount on the cell to be
-                                 * vacated (i.e. the ant's current cell)
-                                 */
-                                float pher_loss = grid[ant_i * N + ant_j].pher_amount / 2;
-                                // the cell to be vacated loses half of its pherormone
-                                grid[ant_i * N + ant_j].pher_amount -= pher_loss; 
-                                float pher_incr = pher_loss / 4;
+                int next_cell_idx = choose_next_cell(neigh_cells);
+                if(next_cell_idx != -1) // there is a cell the current ant can move to
+                {
+                        // get the **global** index of the next cell, using the neighbor-local index
+                        next_cell_idx = neigh_cell_idx[next_cell_idx]; 
 
-                                // distribute the pherormone loss, equally to all 4 neighboring cells
-                                if(ant_j - 1 >= 0)
-                                        grid[ant_i * N + (ant_j - 1)].pher_amount += pher_incr; // left cell
-                                if(ant_j + 1 <= static_cast<int>(N) - 1)
-                                        grid[ant_i * N + (ant_j + 1)].pher_amount += pher_incr; // right cell
-                                if(ant_i - 1 >= 0)
-                                        grid[(ant_i - 1) * N + ant_j].pher_amount += pher_incr; // up cell
-                                if(ant_i + 1 <= static_cast<int>(N) - 1)
-                                        grid[(ant_i + 1) * N + ant_j].pher_amount += pher_incr; // down cell
+                        // vacate the current cell
+                        grid[ant_i * N + ant_j].ant_present = false;
 
-                                // first vacate previous cell
-                                grid[ant_i * N + ant_j].ant_present = false;
-                                // then we can move there, so change the ant's coordinates
-                                ants.at(curr_ant).position = neigh_cells.at(max_pher_cell_index).coords;
+                        /* Update the pheromone amount on the newly vacated cell
+                         * (it loses half of its current pheromone)
+                         */
+                        float pher_loss = grid[ant_i * N + ant_j].pher_amount / 2;
+                        grid[ant_i * N + ant_j].pher_amount -= pher_loss;
+                        
+                        // pheromone increase for the neighboring cells
+                        float pher_incr = pher_loss / num_neigh; 
+                        
+                        //distribute the pheromone loss, equally to all 4 neighboring cells
+                        for (std::size_t i = 0; i < neigh_cells.size(); i++)
+                                if(neigh_cells[i] != nullptr)
+                                        grid[neigh_cell_idx[i]].pher_amount += pher_incr;
+                        
+                        // move ant to the chosen cell
+                        ants[curr_ant].position = grid[next_cell_idx].coords;
+                        // occupy the new cell
+                        grid[next_cell_idx].ant_present = true;
+                }              
+                else // nowhere to move, the ant will stay in the current position
+                        next_cell_idx = ant_i * N + ant_j;
+        }
+}
 
-                                int cell_i = std::get<0>(neigh_cells.at(max_pher_cell_index).coords);
-                                int cell_j = std::get<1>(neigh_cells.at(max_pher_cell_index).coords);
+int AntColonySystem::choose_next_cell(const std::vector<grid_cell_t*> &neigh_cells)
+{
+        std::vector<int> max_vec(neigh_cells.size(), 0);
+        int valid_count = 0;        
+        int first_empty_cell_idx = -1;        
 
-                                // std::cout << "For ant " << curr_ant << "max index = " << max_pher_cell_index
-                                //         << " with pher = " << neigh_cells.at(max_pher_cell_index).pher_amount
-                                //         << " and coords = (" << std::get<0>(neigh_cells.at(max_pher_cell_index).coords)
-                                //         << ", " << std::get<1>(neigh_cells.at(max_pher_cell_index).coords)
-                                //         << ") , so cell_i = " << cell_i << "\tcell_j = " << cell_j << std::endl;
+        // find the first valid and non-occupied neighboring cell
+        auto it = std::find_if(neigh_cells.begin(), neigh_cells.end(), [&](auto const &el)
+                               { return (el != nullptr && !el->ant_present); }); 
 
-                                // update the cell's status to occupied
-                                grid[cell_i * N + cell_j].ant_present = true;
-                        }
+        if (it != neigh_cells.end())
+                first_empty_cell_idx = std::distance(neigh_cells.begin(), it); // calculate index from iterator
+
+        // If there is no empty neighbouring cell or the first empty cell is the last one
+        if (first_empty_cell_idx == -1 || first_empty_cell_idx == static_cast<int>(neigh_cells.size() - 1))
+                return first_empty_cell_idx;
+
+        std::size_t max_cell_idx = first_empty_cell_idx;
+
+        // If there are more than 1 neighbouring cells that are not currently occupied
+        // Pick the one with the maximum amount of pheromone and move there
+        for (std::size_t i = 0; i < neigh_cells.size(); i++)
+        {
+                // skip over dummy or occupied cells
+                if (neigh_cells[i] == nullptr || neigh_cells[i]->ant_present) 
+                        continue;
+
+                // Preserve all the neighbours that have the same max amount of pheromone
+                // so you may later decide in which one to move onto
+                if(neigh_cells[max_cell_idx]->pher_amount == neigh_cells[i]->pher_amount)
+                        max_vec[valid_count++] = i;
+                else if(neigh_cells[max_cell_idx]->pher_amount < neigh_cells[i]->pher_amount)
+                {
+                        max_cell_idx = i; // set the new max index
+                        valid_count = 0; // reset the counter
+                        max_vec[valid_count++] = i;
                 }
         }
+
+        /* Decide the cell with the maximum amount of pheromone to move onto.
+         * The choice is either random  (if all the neighboring cells have the same amount of
+         * pheromone) or not random (if there is only one cell with the max amount of pheromone.
+         * In this case, valid_count = 1, therefore mod valid_count gives as 0, so we select
+         * the first element of the max_vec, which is the one max pheromone cell)
+         */
+        return max_vec[rand() % valid_count];
 }
 
 void AntColonySystem::update_pherormone()
 {
-        /* This function updates the pherormone of each cell, **after** the ants have moved.
-         * Assume that each cell occupied by an ant, gets a pherormone increase of 5%
-         * and empty cells lose the 10% of their pherormone amount
+        /* This function updates the pheromone of each cell, **after** the ants have moved.
+         * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
+         * and empty cells lose the 10% of their current pheromone
          */
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
@@ -287,10 +263,12 @@ void AntColonySystem::advance_system(const int steps)
         for (int s = 0; s < steps; s++)
         {
                 move_ants();
-                //then update the pherormone amounts of each cell (vacated or newly occupied)
-                //update the cells occupied by ants and the empty cells
+                /* After moving the ants, update the pheromone amount of each cell
+                 * (vacated or newly occupied). 
+                 * The following call updates the cells occupied by ants and the empty cells
+                 * of the grid
+                 */
                 update_pherormone();
-
                 curr_time += dt; // advance time
         }
 }
@@ -303,6 +281,7 @@ int main(int argc, char **argv)
                 return 1;
         }
 
+        srand(time(NULL));
         const std::size_t N = 1 << std::atoi(argv[1]); // grid size is 2^argv[1]
         const int ant_count = std::atoi(argv[2]);
         const float tmax = 0.01; // max sim time (value?)
