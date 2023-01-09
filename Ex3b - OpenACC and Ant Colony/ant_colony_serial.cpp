@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <string>
 #include <fstream>
+#include <assert.h>
 #include "timer.hpp"
 
 typedef struct ant_s
@@ -15,8 +16,8 @@ typedef struct grid_cell_s
 {
         std::tuple<int, int> coords;
         float pher_amount;
-        bool ant_present;
-        ant_t ant;
+        bool ant_present = false;
+        // ant_t ant;
 } grid_cell_t;
 
 class AntColonySystem
@@ -76,7 +77,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
 
                 for (int i = 0; i < ant_count; i++)
                         out_file << "Ant " << i << "\t Position : (" << std::get<0>(ants.at(i).position)
-                                 << " ," << std::get<1>(ants.at(i).position) << ")\n";
+                                 << ", " << std::get<1>(ants.at(i).position) << ")\n";
 
                 out_file << "\nEND GRID STATUS\n\n";
         }
@@ -107,15 +108,16 @@ void AntColonySystem::initialize_system()
                 {
                         ant_t ant; // create a new ant
                         ant.position = std::make_tuple(rand_i, rand_j); // add its coordinates
-                        grid[rand_i * N + rand_j].ant = ant; 
-                        ants.emplace_back(ant); // add ant to ants vector
+                        // grid[rand_i * N + rand_j].ant = ant; 
+                        grid[rand_i * N + rand_j].ant_present = true; 
 
+                        ants.emplace_back(ant); // add ant to ants vector
                         ants_placed++;
                         // std::cout << "Ant " << ant_count
                         //           << "\t Position : (" << std::get<0>(ants.at(ant_count).position)
                         //           << " ," << std::get<1>(ants.at(ant_count).position) << ")\n";
                 }
-        }
+        }        
 }
 
 void AntColonySystem::move_ants()
@@ -155,13 +157,12 @@ void AntColonySystem::move_ants()
 
                 if(ant_j - 1 >= 0) // if there exists a left cell
                         neigh_cells.at(0) = grid[ant_i * N + (ant_j - 1)];
-                if(ant_j + 1 <= static_cast<int>(N) - 1) // if there exists a right cell
+                if (ant_j + 1 <= static_cast<int>(N) - 1) // if there exists a right cell
                         neigh_cells.at(1) = grid[ant_i * N + (ant_j + 1)];
-                if(ant_i - 1 >= 0) // if there exists an upper cell
-                        neigh_cells.at(2) = grid[(ant_i - 1) * N + ant_j];     
-                if(ant_i + 1 <= static_cast<int>(N) - 1) // if there exists a below cell
-                        neigh_cells.at(3) = grid[(ant_i + 1) * N + ant_j];     
-
+                if (ant_i - 1 >= 0) // if there exists an upper cell
+                        neigh_cells.at(2) = grid[(ant_i - 1) * N + ant_j];
+                if (ant_i + 1 <= static_cast<int>(N) - 1) // if there exists a below cell
+                        neigh_cells.at(3) = grid[(ant_i + 1) * N + ant_j];
 
                 // neigh_cells.emplace_back(grid[ant_i * N + (ant_j - 1)]);     // add left cell
                 // neigh_cells.emplace_back(grid[ant_i * N + (ant_j + 1)]);     // add right cell
@@ -261,7 +262,6 @@ void AntColonySystem::move_ants()
 
                                 // update the cell's status to occupied
                                 grid[cell_i * N + cell_j].ant_present = true;
-
                         }
                 }
         }
