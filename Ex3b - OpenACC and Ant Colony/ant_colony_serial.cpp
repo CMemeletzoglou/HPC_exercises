@@ -139,11 +139,11 @@ void AntColonySystem::move_ants()
         dummy_cell.pher_amount = 0.0f;
         dummy_cell.coords = std::make_tuple(0, 0);
 
-        neigh_cells = {dummy_cell, dummy_cell, dummy_cell, dummy_cell};
-
-        // iterate for each ant (?)
+        // iterate for each ant
         for (int curr_ant = 0; curr_ant < ant_count; curr_ant++)
         {
+                neigh_cells = {dummy_cell, dummy_cell, dummy_cell, dummy_cell};
+
                 // get the ant's coordinates
                 int ant_i = std::get<0>(ants.at(curr_ant).position);
                 int ant_j = std::get<1>(ants.at(curr_ant).position);
