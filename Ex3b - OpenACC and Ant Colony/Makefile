@@ -1,5 +1,6 @@
 CXXFLAGS?= -Wall -O3 -std=c++14 -g
 
+all: ant_colony_serial ants
 
 ant_colony_serial : ant_colony_serial.cpp
 	g++ $(CXXFLAGS) -o $@  $^
