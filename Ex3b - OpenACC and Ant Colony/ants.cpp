@@ -4,13 +4,14 @@
 #include <algorithm>
 #include <string>
 #include <fstream>
+#include <assert.h>
 #include "timer.hpp"
 
 
 typedef struct grid_cell_s
 {
         float pher_amount;
-        int ants_present;
+        int cell_ants = 0;
 } grid_cell_t;
 
 class AntColonySystem
@@ -66,7 +67,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                                          << "Pherormone = "
                                          << grid[i * N + j].pher_amount << "\t\t\t"
                                          << "Has ant : "
-                                         << grid[i * N + j].ants_present << "\n";
+                                         << grid[i * N + j].cell_ants << "\n";
 
                 out_file << "\n\n**************************Ants**************************\n\n";
 
@@ -74,7 +75,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                 for (std::size_t i = 0; i < N; i++)
                     for (std::size_t j = 0; j < N; j++)
                     {
-                        if(grid[i*N + j].ants_present)
+                        if(grid[i*N + j].cell_ants)
                             out_file << "Ant " << cnt++ << "\t Position : (" << i
                                     << " ," << j << ")\n";
                     }
@@ -96,9 +97,7 @@ void AntColonySystem::initialize_system()
         // Initialize the amount of pherormone in each cell - randomly
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
-                {
                         grid[i * N + j].pher_amount = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-                }
 
         // Place the ant_count ants inside randomly on the grid
         int ants_placed = 0;
@@ -106,12 +105,13 @@ void AntColonySystem::initialize_system()
         {
                 int rand_i = rand() % N;
                 int rand_j = rand() % N;
-                if(!grid[rand_i * N + rand_j].ants_present)
+                if(grid[rand_i * N + rand_j].cell_ants == 0)
                 {
-                        grid[rand_i * N + rand_j].ants_present++; 
+                        grid[rand_i * N + rand_j].cell_ants++; 
                         ants_placed++;
                 }
-        }
+        }      
+        assert(ants_placed == ant_count);
 }
 
 // It either returns the index of the neighbouring cell to move onto
@@ -126,7 +126,7 @@ int AntColonySystem::decideNextCell(const std::vector<grid_cell_t*> vec)
         int max = -1;
         for (std::size_t i = 0; i < vec.size(); i++)
         {
-                if(vec[i] != nullptr && vec[i]->ants_present == 0)
+                if(vec[i] != nullptr && vec[i]->cell_ants == 0)
                 {
                         max = i;
                         break;
@@ -142,9 +142,8 @@ int AntColonySystem::decideNextCell(const std::vector<grid_cell_t*> vec)
         // There are more than 1 neighbouring cells that are not currently occupied
         // Pick the one with the maximum amount of pherormone and move there
         for (std::size_t i = 0; i < vec.size(); i++)
-        // for (std::size_t i = max; i < vec.size(); i++) // ??
         {
-                if (vec[i] == nullptr || vec[i]->ants_present) continue;
+                if (vec[i] == nullptr || vec[i]->cell_ants) continue;
                 // Preserve all the neighbours that have the same max amount of pherormone
                 // so you may later decide in which one to move onto
                 if(vec[max]->pher_amount == vec[i]->pher_amount)
@@ -179,7 +178,7 @@ void AntColonySystem::move_ants()
             for (std::size_t j = 0; j < N; j++)
             {
                 // If there are ant(s) on the grid cell move one to a new position
-                if (grid[i*N + j].ants_present)
+                if (grid[i*N + j].cell_ants)
                 {
                         if (i > 1) // There is a cell above
                         {
@@ -210,8 +209,7 @@ void AntColonySystem::move_ants()
                         if(next_idx != -1)
                         {
                                 next_idx = neigh_cell_idx[next_idx];
-                                grid_tmp[next_idx].ants_present++; // Watch out when parallelizing
-                                // grid_tmp[i*N + j].ants_present += grid[i*N + j].ants_present - 1;
+                                grid_tmp[next_idx].cell_ants++; // Watch out when parallelizing
 
                                 float pher_loss = grid[i*N + j].pher_amount / 2;
                                 grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount - pher_loss;
@@ -227,13 +225,11 @@ void AntColonySystem::move_ants()
                         {
                                 next_idx = i*N + j;
                                 grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount;
-                                grid_tmp[i*N + j].ants_present = grid[i*N + j].ants_present;
+                                grid_tmp[i*N + j].cell_ants = grid[i*N + j].cell_ants;
                         }
                 }
                 else
-                {
                         grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount;
-                }
             }
 }
 
@@ -245,8 +241,8 @@ void AntColonySystem::update_pherormone()
          */
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
-                        if(grid[i * N + j].ants_present)
-                                grid[i*N + j].pher_amount += 0.01 * grid[i*N + j].pher_amount * grid[i*N + j].ants_present;
+                        if(grid[i * N + j].cell_ants)
+                                grid[i*N + j].pher_amount += 0.01 * grid[i*N + j].pher_amount * grid[i*N + j].cell_ants;
                         else
                                 grid[i*N + j].pher_amount -= 0.1 * grid[i*N + j].pher_amount;
 
@@ -254,16 +250,16 @@ void AntColonySystem::update_pherormone()
 
 void AntColonySystem::advance_system(const int steps)
 {
-        grid_cell_t t = grid_cell_t();
-        t.ants_present = 0;
+        grid_cell_t t;
+        t.cell_ants = 0;
         t.pher_amount = 0;
         for (int s = 0; s < steps; s++)
         {
-                std::fill(grid_tmp, grid_tmp + N_tot, t);
-                move_ants();
-                
-                std::swap(grid, grid_tmp);
+                std::fill(grid_tmp, grid_tmp + N_tot, t); // fill grid_tmp with dummy cells
 
+                move_ants();                
+                std::swap(grid, grid_tmp);
+                
                 update_pherormone();
                 //then update the pherormone amounts of each cell (vacated or newly occupied)
                 //update the cells occupied by ants and the empty cells
@@ -307,7 +303,7 @@ int main(int argc, char **argv)
 
         std::cerr << argv[0] << "\t N=" << N << "\t time=" << time_elapsed << "s" << std::endl;
 
-        const std::string ant_grid_filename = "Ant_grid_serial.dat";
+        const std::string ant_grid_filename = "Ant_grid_serial_2.dat";
         system.write_grid_status(ant_grid_filename); // write logging data
 
         return 0;
