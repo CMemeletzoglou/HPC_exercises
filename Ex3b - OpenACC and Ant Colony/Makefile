@@ -8,8 +8,8 @@ ant_colony_serial : ant_colony_serial.cpp
 ants : ants.cpp
 	g++ $(CXXFLAGS) -o $@  $^
 
-oacc : oacc_ants.cpp
-	nvc++ -fast -acc -Minfo=accel oacc_ants.cpp -o oacc_ants
+ants_acc : ants_acc.cpp
+	nvc++ -fast -acc -ta=tesla -Minfo=accel ants_acc.cpp -o ants_acc
 
 clean :
 	rm -f ant_colony_serial ants

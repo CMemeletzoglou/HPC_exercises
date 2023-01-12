@@ -256,9 +256,6 @@ void AntColonySystem::update_pheromone()
                         else if (grid[i*N + j].pher_amount > 100)
                                 grid[i*N + j].pher_amount = 100;
                 }
-                        
-
-
 }
 
 void AntColonySystem::advance_system(const int steps)
@@ -266,6 +263,7 @@ void AntColonySystem::advance_system(const int steps)
         grid_cell_t t;
         t.cell_ants = 0;
         t.pher_amount = 0;
+        
         for (int s = 0; s < steps; s++)
         {
                 std::fill(grid_tmp, grid_tmp + N_tot, t); // fill grid_tmp with dummy cells
