@@ -8,21 +8,11 @@
 #include <openacc.h>
 #include "timer.hpp"
 
-// typedef struct neigh_info_s
-// {
-//         grid_cell_t* neigh_cells[4] = {nullptr};
-//         std::size_t neigh_cell_idx[4];
-//         std::size_t nneigh;
-// } neigh_info_t;
-
 typedef struct grid_cell_s
 {
         float pher_amount = 0.0f;
         int cell_ants = 0;      
 } grid_cell_t;
-
-// std::vector<grid_cell_t*> neigh_cells(4, nullptr);
-// std::vector<int> neigh_cell_idx(4, -1);
 
 class AntColonySystem
 {
@@ -32,7 +22,6 @@ class AntColonySystem
                         // allocate memory for the grid
                         grid = new grid_cell_t[N_tot];
                         grid_tmp = new grid_cell_t[N_tot];
-                        // grid_cell_t *grid_tmp; // maybe need to change this
 
                         #pragma acc enter data copyin(this)
                         #pragma acc enter data create(grid[0:N_tot], grid_tmp[0:N_tot])
@@ -68,7 +57,7 @@ class AntColonySystem
                 const std::size_t N, N_tot;
                 int ant_count;
 
-                const float dt = 1e-3; // value (??)
+                const float dt = 1e-3; 
                 float curr_time = 0.0f;
 
                 grid_cell_t *__restrict grid, *__restrict grid_tmp;
@@ -82,14 +71,14 @@ void AntColonySystem::write_grid_status(const std::string filename) const
         out_file.open(filename.c_str(), std::ios::out);
         if(out_file.good())
         {
-                // for (std::size_t i = 0; i < N; i++)
-                //         for (std::size_t j = 0; j < N; j++)
-                //                 out_file << "Cell[" << i << ", " << j << "] : "
-                //                          << "\t"
-                //                          << "pheromone = "
-                //                          << grid[i * N + j].pher_amount << "\t\t\t"
-                //                          << "Has ant : "
-                //                          << grid[i * N + j].cell_ants << "\n";
+                for (std::size_t i = 0; i < N; i++)
+                        for (std::size_t j = 0; j < N; j++)
+                                out_file << "Cell[" << i << ", " << j << "] : "
+                                         << "\t"
+                                         << "pheromone = "
+                                         << grid[i * N + j].pher_amount << "\t\t\t"
+                                         << "Has ant : "
+                                         << grid[i * N + j].cell_ants << "\n";
 
                 out_file << "\n\n**************************Ants**************************\n\n";
 
@@ -128,7 +117,6 @@ void AntColonySystem::initialize_system()
                         ants_placed++;
                 }
         }
-        // assert(ants_placed == ant_count);
 
         #pragma acc update device(grid[0:N_tot]) // send the initialized grid to the GPU
 }
@@ -139,16 +127,10 @@ int AntColonySystem::choose_next_cell(grid_cell_t **arr, int n)
 {
         grid_cell_t* max_cell = nullptr;
         int max_idx = -1;
-        // (*max_cell) = nullptr;
-        // (*max_idx) = -1;
 
         #pragma acc loop seq
         for (int i = 0; i < n; i++) // iterate through the neighboring cells
         {
-                // if( arr[i]->cell_ants == 0
-                //         && (max_cell == nullptr 
-                //         || arr[i]->pher_amount > max_cell->pher_amount)
-                //   )
                 if(arr[i] != nullptr && arr[i]->cell_ants == 0 && max_cell != nullptr)
                 {
                         if (arr[i]->pher_amount > max_cell->pher_amount)
@@ -332,7 +314,7 @@ int main(int argc, char **argv)
                 return 1;
         }
 
-        srand(1);
+        srand(time(NULL));
 
         const std::size_t N = 1 << std::atoi(argv[1]); // grid size is 2^argv[1]
         const int ant_count = std::atoi(argv[2]);

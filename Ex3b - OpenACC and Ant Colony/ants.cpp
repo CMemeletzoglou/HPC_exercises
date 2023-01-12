@@ -48,7 +48,7 @@ class AntColonySystem
                 const std::size_t N, N_tot;
                 int ant_count;
 
-                const float dt = 1e-3; // value (??)
+                const float dt = 1e-3; 
                 float curr_time = 0.0f;
 
                 grid_cell_t *grid, *grid_tmp;
