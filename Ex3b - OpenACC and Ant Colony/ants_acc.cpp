@@ -63,7 +63,7 @@ class AntColonySystem
                 void update_pheromone();
 
                 #pragma acc routine seq
-                int choose_next_cell(grid_cell_t** arr, int n = 4);
+                int choose_next_cell(grid_cell_t **arr, int n = 4);
 
                 const std::size_t N, N_tot;
                 int ant_count;
@@ -76,18 +76,20 @@ class AntColonySystem
 
 void AntColonySystem::write_grid_status(const std::string filename) const
 {
+        #pragma acc update self(grid[:N_tot])
+
         std::ofstream out_file;
         out_file.open(filename.c_str(), std::ios::out);
         if(out_file.good())
         {
-                for (std::size_t i = 0; i < N; i++)
-                        for (std::size_t j = 0; j < N; j++)
-                                out_file << "Cell[" << i << ", " << j << "] : "
-                                         << "\t"
-                                         << "pheromone = "
-                                         << grid[i * N + j].pher_amount << "\t\t\t"
-                                         << "Has ant : "
-                                         << grid[i * N + j].cell_ants << "\n";
+                // for (std::size_t i = 0; i < N; i++)
+                //         for (std::size_t j = 0; j < N; j++)
+                //                 out_file << "Cell[" << i << ", " << j << "] : "
+                //                          << "\t"
+                //                          << "pheromone = "
+                //                          << grid[i * N + j].pher_amount << "\t\t\t"
+                //                          << "Has ant : "
+                //                          << grid[i * N + j].cell_ants << "\n";
 
                 out_file << "\n\n**************************Ants**************************\n\n";
 
@@ -133,13 +135,14 @@ void AntColonySystem::initialize_system()
 
 // It either returns the index of the neighbouring cell to move onto
 // or -1 to stay where you are
-int AntColonySystem::choose_next_cell(grid_cell_t** arr, int n)
+int AntColonySystem::choose_next_cell(grid_cell_t **arr, int n)
 {
         grid_cell_t* max_cell = nullptr;
         int max_idx = -1;
         // (*max_cell) = nullptr;
         // (*max_idx) = -1;
 
+        #pragma acc loop seq
         for (int i = 0; i < n; i++) // iterate through the neighboring cells
         {
                 // if( arr[i]->cell_ants == 0
@@ -178,10 +181,12 @@ void AntColonySystem::move_ants()
         // Iterate over each grid cell
         #pragma acc data present(this)
         #pragma acc data present(grid[:N_tot], grid_tmp[:N_tot])
-        #pragma acc parallel loop collapse(2) private(neigh_cells[:4], neigh_cell_idx[:4], nneigh, max_idx, max_cell) /* cache(neigh_cells, neigh_cell_idx, nneigh) */
+        #pragma acc parallel loop collapse(2) \
+                        private(neigh_cells[:4], neigh_cell_idx[:4], nneigh, max_idx, max_cell[:1]) /* cache(neigh_cells, neigh_cell_idx, nneigh) */
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
                 {
+                        #pragma acc loop seq
                         for(std::size_t k = 0; k < 4; k++)
                         {
                                 neigh_cells[k] = nullptr;
@@ -219,37 +224,48 @@ void AntColonySystem::move_ants()
                                         neigh_cells[3] = &(grid[neigh_cell_idx[3]]);
                                         nneigh++;
                                 }
-
-                                
-                                // int next_cell_idx = 0;
                                 
                                 int next_cell_idx = choose_next_cell(neigh_cells);
                                 if(next_cell_idx != -1) // there is a cell the current ant can move to
                                 {
                                         // get the **global** index of the next cell, using the neighbor-local index
-                                        next_cell_idx = neigh_cell_idx[next_cell_idx];
+                                        next_cell_idx = neigh_cell_idx[next_cell_idx];  
                                         grid_tmp[i*N + j].cell_ants = grid[i*N + j].cell_ants - 1; // vacate the current cell
 
                                         float pher_loss = grid[i*N + j].pher_amount / 2;
-                                        grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount - pher_loss;
 
+                                        #pragma acc atomic
+                                        grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount - pher_loss;
                                         float pher_incr = pher_loss / nneigh;
+
+                                        #pragma acc loop seq
                                         for (std::size_t i = 0; i < 4; i++)
-                                                if (neigh_cells[i] != nullptr) 
+                                                if (neigh_cells[i] != nullptr)
+                                                {
+                                                        #pragma acc atomic
                                                         grid_tmp[neigh_cell_idx[i]].pher_amount += pher_incr;
+                                                }
 
                                         // move to the chosen cell
+                                        #pragma acc atomic
                                         grid_tmp[next_cell_idx].cell_ants++; // Watch out when parallelizing
                                 }
                                 else // nowhere to move, the ant will stay in the current position
                                 {
                                         next_cell_idx = i*N + j;
+
+                                        #pragma acc atomic
                                         grid_tmp[next_cell_idx].pher_amount += grid[next_cell_idx].pher_amount;
+
+                                        #pragma acc atomic write
                                         grid_tmp[next_cell_idx].cell_ants = grid[next_cell_idx].cell_ants;
                                 }
                         }
                         else // the current cell does not have an ant
+                        {
+                                #pragma acc atomic
                                 grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount;
+                        }
                 }
 }
 
@@ -267,7 +283,7 @@ void AntColonySystem::update_pheromone()
                         if(grid[i * N + j].cell_ants)
                                 grid[i*N + j].pher_amount += 0.05 * grid[i*N + j].pher_amount * grid[i*N + j].cell_ants;
                         else
-                                grid[i*N + j].pher_amount -= 0.001 * grid[i*N + j].pher_amount;
+                                grid[i*N + j].pher_amount -= 0.1 * grid[i*N + j].pher_amount;
 
                         if (grid[i*N + j].pher_amount < 0)
                                 grid[i*N + j].pher_amount = 0;
@@ -289,15 +305,16 @@ void AntColonySystem::advance_system(const int steps)
                                 grid_tmp[i*N + j].pher_amount = 0.0f;
                                 grid_tmp[i*N + j].cell_ants = 0;
                         }
+                
+                assert(grid_tmp[0].pher_amount == 0.0f);
+                assert(grid_tmp[0].cell_ants == 0);
 
                 move_ants();
-
-                // std::swap(grid, grid_tmp); ////host
-
-                // #pragma acc parallel loop collapse(2)
-                // for(int i=0; i<N; i++)
-                //         for(int j=0; j<N; j++)
-                //                 grid[i * N + j] = grid_tmp[i * N + j];
+                
+                #pragma acc parallel loop collapse(2)
+                for(int i=0; i<N; i++)
+                        for(int j=0; j<N; j++)
+                                grid[i*N + j] = grid_tmp[i*N + j];
 
                 update_pheromone();
                 //then update the pheromone amounts of each cell (vacated or newly occupied)
@@ -315,7 +332,7 @@ int main(int argc, char **argv)
                 return 1;
         }
 
-        srand(time(NULL));
+        srand(1);
 
         const std::size_t N = 1 << std::atoi(argv[1]); // grid size is 2^argv[1]
         const int ant_count = std::atoi(argv[2]);
@@ -344,7 +361,7 @@ int main(int argc, char **argv)
 
         std::cerr << argv[0] << "\t N=" << N << "\t time=" << time_elapsed << "s" << std::endl;
 
-        const std::string ant_grid_filename = "Ant_grid_serial_2.dat";
+        const std::string ant_grid_filename = "Ant_grid_acc.dat";
         system.write_grid_status(ant_grid_filename); // write logging data
 
         return 0;
