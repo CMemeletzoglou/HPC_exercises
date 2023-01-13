@@ -45,13 +45,13 @@ class AntColonySystem
                 void initialize_system();
 
                 void move_ants();
-                int choose_next_cell(const std::vector<grid_cell_t*> &);
-                void update_pherormone();
+                int choose_next_cell(const grid_cell_t **arr, int n = 4);
+                void update_pheromone();
 
                 const std::size_t N, N_tot;
                 int ant_count;
 
-                const float dt = 1e-3; // value (??)
+                const float dt = 1e-3;
                 float curr_time = 0.0f;
 
                 grid_cell_t *grid;
@@ -109,9 +109,6 @@ void AntColonySystem::initialize_system()
 
                         ants.emplace_back(ant); // add ant to ants vector
                         ants_placed++;
-                        // std::cout << "Ant " << ant_count
-                        //           << "\t Position : (" << std::get<0>(ants.at(ant_count).position)
-                        //           << " ," << std::get<1>(ants.at(ant_count).position) << ")\n";
                 }
         }        
 }
@@ -135,7 +132,11 @@ void AntColonySystem::move_ants()
 
                 /* Need to check for existence of left, right, upper and lower cells
                  * since the ants placed on the grid's boundaries, do not have all
-                 * kinds of neighbors
+                 * kinds of neighbors.
+                 * Store the neighboring cells into neigh_cell using the order :
+                 * left, right, upper, below.
+                 * Store the global index of each neighboring cell into the 
+                 * corresponding cell of array neigh_cell_idx.
                  */
                 if(ant_j - 1 >= 0) // if there exists a left cell
                 {
@@ -162,7 +163,7 @@ void AntColonySystem::move_ants()
                         num_neigh++;
                 }
 
-                int next_cell_idx = choose_next_cell(neigh_cells);
+                int next_cell_idx = choose_next_cell((const grid_cell_t**)&neigh_cells, 4);
                 if(next_cell_idx != -1) // there is a cell the current ant can move to
                 {
                         // get the **global** index of the next cell, using the neighbor-local index
@@ -195,67 +196,71 @@ void AntColonySystem::move_ants()
         }
 }
 
-int AntColonySystem::choose_next_cell(const std::vector<grid_cell_t*> &neigh_cells)
+// It either returns the index of the neighbouring cell to move onto
+// or -1 to stay where you are
+int AntColonySystem::choose_next_cell(const grid_cell_t** arr, int n)
 {
-        std::vector<int> max_vec(neigh_cells.size(), 0);
-        int valid_count = 0;        
-        int first_empty_cell_idx = -1;        
-
+        std::vector<int> max_vec;
+        int first_empty_cell_idx = -1;
+        
         // find the first valid and non-occupied neighboring cell
-        auto it = std::find_if(neigh_cells.begin(), neigh_cells.end(), [&](auto const &el)
-                               { return (el != nullptr && !el->ant_present); }); 
-
-        if (it != neigh_cells.end())
-                first_empty_cell_idx = std::distance(neigh_cells.begin(), it); // calculate index from iterator
-
-        // If there is no empty neighbouring cell or the first empty cell is the last one
-        if (first_empty_cell_idx == -1 || first_empty_cell_idx == static_cast<int>(neigh_cells.size() - 1))
-                return first_empty_cell_idx;
-
-        std::size_t max_cell_idx = first_empty_cell_idx;
-
-        // If there are more than 1 neighbouring cells that are not currently occupied
-        // Pick the one with the maximum amount of pheromone and move there
-        for (std::size_t i = 0; i < neigh_cells.size(); i++)
+        for (int i = 0; i < n; i++)
         {
-                // skip over dummy or occupied cells
-                if (neigh_cells[i] == nullptr || neigh_cells[i]->ant_present) 
-                        continue;
-
-                // Preserve all the neighbours that have the same max amount of pheromone
-                // so you may later decide in which one to move onto
-                if(neigh_cells[max_cell_idx]->pher_amount == neigh_cells[i]->pher_amount)
-                        max_vec[valid_count++] = i;
-                else if(neigh_cells[max_cell_idx]->pher_amount < neigh_cells[i]->pher_amount)
+                if(arr[i] != nullptr && !(arr[i]->ant_present))
                 {
-                        max_cell_idx = i; // set the new max index
-                        valid_count = 0; // reset the counter
-                        max_vec[valid_count++] = i;
+                        first_empty_cell_idx = -1; 
+                        break;
                 }
         }
 
-        /* Decide the cell with the maximum amount of pheromone to move onto.
+        // If there is no empty neighbouring cell or the first empty cell is the last one
+        if (first_empty_cell_idx == -1 || first_empty_cell_idx == static_cast<int>(n - 1))
+                return first_empty_cell_idx;
+        
+        std::size_t max_cell_idx = first_empty_cell_idx;
+        max_vec.push_back(max_cell_idx);
+
+        // There are more than 1 neighbouring cells that are not currently occupied
+        // Pick the one with the maximum amount of pheromone and move there
+        for (int i = first_empty_cell_idx + 1; i < n; i++)
+        {
+                // skip over dummy or occupied cells
+                if (arr[i] == nullptr || arr[i]->ant_present) continue;
+
+                // Preserve all the neighbours that have the same max amount of pheromone
+                // so you may later decide in which one to move onto
+                // if(arr[max_cell_idx]->pher_amount == arr[i]->pher_amount)
+                if(std::abs(arr[max_cell_idx]->pher_amount - arr[i]->pher_amount) < 1e-7)
+                        max_vec.push_back(i);
+                else if(arr[max_cell_idx]->pher_amount < arr[i]->pher_amount)
+                {
+                        max_cell_idx = i; // set the new max
+                        max_vec.clear(); // reset the vector
+                        max_vec.push_back(i);
+                }
+        }
+
+        /* Choose the cell with the maximum amount of pheromone to move onto.
          * The choice is either random  (if all the neighboring cells have the same amount of
          * pheromone) or not random (if there is only one cell with the max amount of pheromone.
          * In this case, valid_count = 1, therefore mod valid_count gives as 0, so we select
          * the first element of the max_vec, which is the one max pheromone cell)
          */
-        return max_vec[rand() % valid_count];
+        return max_vec[rand() % max_vec.size()];
 }
 
-void AntColonySystem::update_pherormone()
+/* This function updates the pheromone of each cell, **after** the ants have moved.
+ * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
+ * and empty cells lose the 10% of their current pheromone
+ */
+void AntColonySystem::update_pheromone()
 {
-        /* This function updates the pheromone of each cell, **after** the ants have moved.
-         * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
-         * and empty cells lose the 10% of their current pheromone
-         */
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
                         if(grid[i * N + j].ant_present)
                                 grid[i * N + j].pher_amount += 0.05 * grid[i * N + j].pher_amount;
                         else
                                 grid[i * N + j].pher_amount -= 0.1 * grid[i * N + j].pher_amount;
-
 }
 
 void AntColonySystem::advance_system(const int steps)
@@ -268,7 +273,7 @@ void AntColonySystem::advance_system(const int steps)
                  * The following call updates the cells occupied by ants and the empty cells
                  * of the grid
                  */
-                update_pherormone();
+                update_pheromone();
                 curr_time += dt; // advance time
         }
 }
@@ -283,8 +288,8 @@ int main(int argc, char **argv)
 
         srand(time(NULL));
         const std::size_t N = 1 << std::atoi(argv[1]); // grid size is 2^argv[1]
-        const int ant_count = std::atoi(argv[2]);
-        const float tmax = 0.01; // max sim time (value?)
+        const int ant_count = std::atoi(argv[2]); // number of ants to place on the 2D grid
+        const float tmax = 0.01; // max sim time
         const int steps_between_measurements = 100;
 
         // create a N x N AntColonySystem
