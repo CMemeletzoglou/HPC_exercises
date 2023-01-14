@@ -5,7 +5,6 @@
 #include <string>
 #include <fstream>
 #include <assert.h>
-#include <openacc.h>
 #include "timer.hpp"
 
 
@@ -25,6 +24,13 @@ class AntColonySystem
                         grid = new grid_cell_t[N_tot];
                         grid_tmp = new grid_cell_t[N_tot];
 
+                        /* First copy the "this" pointer to the current instance onto the device.
+                         * This copies, the instance along with its scalar members.
+                         * Then we need to create space on the device for the grid and grid_tmp
+                         * arrays. Once created, the device memory blocks pointed to by these 
+                         * pointers, will be attached automatically to the pointers of the 
+                         * "this" instance.
+                         */
                         #pragma acc enter data copyin(this)
                         #pragma acc enter data create(grid[0:N_tot], grid_tmp[0:N_tot])
 
@@ -33,6 +39,9 @@ class AntColonySystem
 
                 ~AntColonySystem()
                 {
+                        /* First deallocate the device memory blocks and then delete the 
+                         * "this" pointer, in order to avoid dangling pointers.
+                         */
                         #pragma acc exit data delete(grid_tmp[0:N_tot], grid[:N_tot])
                         #pragma acc exit data delete(this)
 
@@ -42,9 +51,8 @@ class AntColonySystem
                 }
 
                 float get_time() const { return curr_time; }
-
+                
                 void advance_system(const int);
-
                 void write_grid_status(const std::string) const;
         private:
                 void initialize_system();
@@ -58,14 +66,23 @@ class AntColonySystem
                 const std::size_t N, N_tot;
                 int ant_count;
 
-                const float dt = 1e-3; // value (??)
+                const float dt = 1e-3;
                 float curr_time = 0.0f;
 
+                /* Use the GNU g++'s __restrict keyword, as an equivalent of the
+                 * C99 restrict keyword, to disable the compiler's checks for 
+                 * pointer aliasing. This enables the compiler to generate
+                 * parallel code for the loops that use these pointers, by ensuring
+                 * the compiler that pointer aliasing will not occur.
+                 */
                 grid_cell_t *__restrict grid, *__restrict grid_tmp;
 };
 
 void AntColonySystem::write_grid_status(const std::string filename) const
 {
+        /* Copyout the grid array from the device memory, which represents the grid's
+         * final status, to CPU memory, in order to write the logging data.
+         */
         #pragma acc update self(grid[:N_tot])
 
         std::ofstream out_file;
@@ -90,7 +107,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                                 out_file << "Ant " << cnt++ << "\t Position : (" << i
                                                 << ", " << j << ")\n";
 
-                out_file << "\nEND GRID STATUS\n\n";
+                out_file << "\nEND GRID STATUS";
         }
 
         out_file.close();
@@ -106,7 +123,7 @@ void AntColonySystem::initialize_system()
                 for (std::size_t j = 0; j < N; j++)
                         grid[i * N + j].pher_amount = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 
-        // Place the ant_count ants inside randomly on the grid
+        // Place the ant_count ants randomly inside the grid
         int ants_placed = 0;
         while(ants_placed < ant_count)
         {
@@ -118,7 +135,6 @@ void AntColonySystem::initialize_system()
                         ants_placed++;
                 }
         }
-        // assert(ants_placed == ant_count);
 
         #pragma acc update device(grid[0:N_tot]) // send the initialized grid to the GPU
 }
@@ -130,9 +146,13 @@ int AntColonySystem::choose_next_cell(const grid_cell_t **arr, int n)
         const grid_cell_t* max_cell = nullptr;
         int max_idx = -1;
 
-        #pragma acc loop seq
+        #pragma acc loop seq        // execute this loop sequentially
         for (int i = 0; i < n; i++) // iterate through the neighboring cells
         {
+                /* skip over missing neighboring cells or non-empty cells
+                 * and check if max_cell points to a valid cell and if there is
+                 * a cell with a higher amount of pheromone
+                 */
                 if( arr[i] != nullptr
                         && arr[i]->cell_ants == 0
                         && (max_cell == nullptr 
@@ -142,7 +162,8 @@ int AntColonySystem::choose_next_cell(const grid_cell_t **arr, int n)
                         max_idx = i;
                   }
         }
-        return max_idx;
+        // return the index of the max pheromone cell with the respect to the arr argument
+        return max_idx; 
 }
 
 void AntColonySystem::move_ants()
@@ -154,16 +175,17 @@ void AntColonySystem::move_ants()
         int neigh_cell_idx[4];
         int nneigh = 0;
 
-        // Iterate over each grid cell
+        /* Iterate over each grid cell informing the compiler that the necessary
+         * data is already present on the device. We also use the collapse clause
+         * on the loop directive, to merge the two loops into one loop.
+         */
         #pragma acc data present(this)
         #pragma acc data present(grid[:N_tot], grid_tmp[:N_tot])
-        #pragma acc parallel loop collapse(2) \
-                        private(neigh_cells[:4], neigh_cell_idx[:4], nneigh)
-                        /* cache(neigh_cells, neigh_cell_idx, nneigh) */
+        #pragma acc parallel loop collapse(2) private(neigh_cells[:4], neigh_cell_idx[:4], nneigh)                        
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
                 {
-                        #pragma acc loop seq
+                        #pragma acc loop seq    // execute this loop sequentially
                         for(std::size_t k = 0; k < 4; k++)
                         {
                                 neigh_cells[k] = nullptr;
@@ -171,12 +193,10 @@ void AntColonySystem::move_ants()
                         }
                         nneigh = 0;
 
-                        // If there are ant(s) on the grid cell move one to a new position
+                        // If there are ant(s) on the grid cell, move **one** to a new position
                         if (grid[i*N + j].cell_ants)
                         {
-                                /* Need to check if an ant has an upper, lower, left or right cell, because
-                                * the ants on the grid's boundaries don't have all kinds of neighbors.
-                                */
+                                // Need to check if there are all kinds of neighboring cells
                                 if (i > 1) // There is a cell above
                                 {
                                         neigh_cell_idx[0] = (i-1)*N + j;
@@ -207,10 +227,13 @@ void AntColonySystem::move_ants()
                                 {
                                         // get the **global** index of the next cell, using the neighbor-local index
                                         next_cell_idx = neigh_cell_idx[next_cell_idx];  
+
+                                        // This effectively moves only **one** ant, that resides on the (i, j) cell
                                         grid_tmp[i*N + j].cell_ants = grid[i*N + j].cell_ants - 1; // vacate the current cell
 
                                         float pher_loss = grid[i*N + j].pher_amount / 2;
 
+                                        // use the atomic directive to protect the value from concurrent accesses
                                         #pragma acc atomic
                                         grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount - pher_loss;
                                         float pher_incr = pher_loss / nneigh;
@@ -231,6 +254,10 @@ void AntColonySystem::move_ants()
                                 {
                                         next_cell_idx = i*N + j;
 
+                                        /* The next two atomically protected instructions, will make the status
+                                         * of the next_cell_idx cell, exactly the same as it was at the previous
+                                         * timestep, since no change will happen upon this cell.
+                                         */
                                         #pragma acc atomic
                                         grid_tmp[next_cell_idx].pher_amount += grid[next_cell_idx].pher_amount;
 
@@ -240,18 +267,19 @@ void AntColonySystem::move_ants()
                         }
                         else // the current cell does not have an ant
                         {
+                                // "copy" the pheromone amount of the previous timestep into the current one
                                 #pragma acc atomic
                                 grid_tmp[i*N + j].pher_amount += grid[i*N + j].pher_amount;
                         }
                 }
 }
 
+/* This function updates the pheromone of each cell, **after** the ants have moved.
+ * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
+ * and empty cells lose the 10% of their pheromone amount
+ */
 void AntColonySystem::update_pheromone()
 {
-        /* This function updates the pheromone of each cell, **after** the ants have moved.
-         * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
-         * and empty cells lose the 10% of their pheromone amount
-         */
         #pragma acc data present(this)
         #pragma acc parallel loop collapse(2) present(grid[:N_tot])
         for (std::size_t i = 0; i < N; i++)
@@ -264,7 +292,7 @@ void AntColonySystem::update_pheromone()
 
                         if (grid[i*N + j].pher_amount < 0)
                                 grid[i*N + j].pher_amount = 0;
-                        else if (grid[i*N + j].pher_amount > 100)
+                        else if (grid[i*N + j].pher_amount > 100) // assume that a cell can at most have a pherormone of 100
                                 grid[i*N + j].pher_amount = 100;
                 }
 }
@@ -275,6 +303,9 @@ void AntColonySystem::advance_system(const int steps)
         #pragma acc data present(grid[:N_tot], grid_tmp[:N_tot])
         for (int s = 0; s < steps; s++)
         {
+                /* Fill the grid_tmp array with empty cells, on which the grid's next
+                 * status will be written.
+                 */
                 #pragma acc parallel loop collapse(2)
                 for(int i=0; i<N; i++)
                         for(int j=0; j<N; j++)
@@ -284,15 +315,15 @@ void AntColonySystem::advance_system(const int steps)
                         }
 
                 move_ants();
-                
+
+                // swap the two arrays                
                 #pragma acc parallel loop collapse(2)
                 for(int i=0; i<N; i++)
                         for(int j=0; j<N; j++)
                                 grid[i*N + j] = grid_tmp[i*N + j];
 
+                // Then update the pheromone amounts of each cell (vacated or newly occupied)                
                 update_pheromone();
-                //then update the pheromone amounts of each cell (vacated or newly occupied)
-                //update the cells occupied by ants and the empty cells
 
                 curr_time += dt; // advance time
         }

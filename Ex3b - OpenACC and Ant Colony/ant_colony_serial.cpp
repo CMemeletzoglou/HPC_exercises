@@ -37,9 +37,7 @@ class AntColonySystem
                 }
 
                 float get_time() const { return curr_time; }
-
                 void advance_system(const int);
-
                 void write_grid_status(const std::string) const;
         private:
                 void initialize_system();
@@ -79,7 +77,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                         out_file << "Ant " << i << "\t Position : (" << std::get<0>(ants[i].position)
                                  << ", " << std::get<1>(ants[i].position) << ")\n";
 
-                out_file << "\nEND GRID STATUS\n\n";
+                out_file << "\nEND GRID STATUS";
         }
 
         out_file.close();
@@ -96,6 +94,7 @@ void AntColonySystem::initialize_system()
                         grid[i * N + j].pher_amount = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
                 }
 
+        // Place the ant_count ants randomly inside the grid
         int ants_placed = 0;
         while(ants_placed < ant_count)
         {
@@ -257,10 +256,17 @@ void AntColonySystem::update_pheromone()
 {
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
+                {
                         if(grid[i * N + j].ant_present)
                                 grid[i * N + j].pher_amount += 0.05 * grid[i * N + j].pher_amount;
                         else
                                 grid[i * N + j].pher_amount -= 0.1 * grid[i * N + j].pher_amount;
+
+                        if (grid[i*N + j].pher_amount < 0)
+                                grid[i*N + j].pher_amount = 0;
+                        else if (grid[i*N + j].pher_amount > 100) // assume that a cell can at most have a pherormone of 100
+                                grid[i*N + j].pher_amount = 100;
+                }
 }
 
 void AntColonySystem::advance_system(const int steps)
@@ -271,7 +277,7 @@ void AntColonySystem::advance_system(const int steps)
                 /* After moving the ants, update the pheromone amount of each cell
                  * (vacated or newly occupied). 
                  * The following call updates the cells occupied by ants and the empty cells
-                 * of the grid
+                 * of the grid.
                  */
                 update_pheromone();
                 curr_time += dt; // advance time

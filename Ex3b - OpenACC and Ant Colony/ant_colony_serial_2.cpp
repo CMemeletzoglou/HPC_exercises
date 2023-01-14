@@ -33,9 +33,7 @@ class AntColonySystem
                 }
 
                 float get_time() const { return curr_time; }
-
                 void advance_system(const int);
-
                 void write_grid_status(const std::string) const;
         private:
                 void initialize_system();
@@ -48,7 +46,7 @@ class AntColonySystem
                 const std::size_t N, N_tot;
                 int ant_count;
 
-                const float dt = 1e-3; // value (??)
+                const float dt = 1e-3; 
                 float curr_time = 0.0f;
 
                 grid_cell_t *grid, *grid_tmp;
@@ -78,7 +76,7 @@ void AntColonySystem::write_grid_status(const std::string filename) const
                                 out_file << "Ant " << cnt++ << "\t Position : (" << i
                                                 << ", " << j << ")\n";
 
-                out_file << "\nEND GRID STATUS\n\n";
+                out_file << "\nEND GRID STATUS";
         }
 
         out_file.close();
@@ -94,7 +92,7 @@ void AntColonySystem::initialize_system()
                 for (std::size_t j = 0; j < N; j++)
                         grid[i * N + j].pher_amount = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 
-        // Place the ant_count ants inside randomly on the grid
+        // Place the ant_count ants randomly inside the grid
         int ants_placed = 0;
         while(ants_placed < ant_count)
         {
@@ -105,8 +103,7 @@ void AntColonySystem::initialize_system()
                         grid[rand_i * N + rand_j].cell_ants++; 
                         ants_placed++;
                 }
-        }      
-        assert(ants_placed == ant_count);
+        }              
 }
 
 // It either returns the index of the neighbouring cell to move onto
@@ -118,6 +115,10 @@ int AntColonySystem::choose_next_cell(const grid_cell_t** arr, int n)
 
         for (int i = 0; i < n; i++) // iterate through the neighboring cells
         {
+                /* skip over missing neighboring cells or non-empty cells
+                 * and check if max_cell points to a valid cell and if there is
+                 * a cell with a higher amount of pheromone
+                 */
                 if( arr[i] != nullptr
                         && arr[i]->cell_ants == 0
                         && (max_cell == nullptr 
@@ -150,12 +151,10 @@ void AntColonySystem::move_ants()
                         }
                         nneigh = 0;
                         
-                        // If there are ant(s) on the grid cell move one to a new position
+                        // If there are ant(s) on the grid cell, move **one** to a new position
                         if (grid[i*N + j].cell_ants)
                         {
-                                /* Need to check if an ant has an upper, lower, left or right cell, because
-                                * the ants on the grid's boundaries don't have all kinds of neighbors.
-                                */
+                                // Need to check if there are all kinds of neighboring cells
                                 if (i > 1) // There is a cell above
                                 {
                                         neigh_cell_idx[0] = (i-1)*N + j;
@@ -197,7 +196,7 @@ void AntColonySystem::move_ants()
                                                         grid_tmp[neigh_cell_idx[i]].pher_amount += pher_incr;
 
                                         // move to the chosen cell
-                                        grid_tmp[next_cell_idx].cell_ants++; // Watch out when parallelizing
+                                        grid_tmp[next_cell_idx].cell_ants++;
                                 }
                                 else // nowhere to move, the ant will stay in the current position
                                 {
@@ -211,12 +210,12 @@ void AntColonySystem::move_ants()
                 }
 }
 
+/* This function updates the pheromone of each cell, **after** the ants have moved.
+ * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
+ * and empty cells lose the 10% of their pheromone amount
+ */
 void AntColonySystem::update_pheromone()
 {
-        /* This function updates the pheromone of each cell, **after** the ants have moved.
-         * Assume that each cell occupied by an ant, gets a pheromone increase of 5%
-         * and empty cells lose the 10% of their pheromone amount
-         */
         for (std::size_t i = 0; i < N; i++)
                 for (std::size_t j = 0; j < N; j++)
                 {
@@ -227,7 +226,7 @@ void AntColonySystem::update_pheromone()
 
                         if (grid[i*N + j].pher_amount < 0)
                                 grid[i*N + j].pher_amount = 0;
-                        else if (grid[i*N + j].pher_amount > 100)
+                        else if (grid[i*N + j].pher_amount > 100) // assume that a cell can at most have a pherormone of 100
                                 grid[i*N + j].pher_amount = 100;
                 }
 }
@@ -243,11 +242,10 @@ void AntColonySystem::advance_system(const int steps)
                 std::fill(grid_tmp, grid_tmp + N_tot, t); // fill grid_tmp with dummy cells
 
                 move_ants();                
-                std::swap(grid, grid_tmp);
+                std::swap(grid, grid_tmp); // swap the array pointers
                 
-                update_pheromone();
                 //then update the pheromone amounts of each cell (vacated or newly occupied)
-                //update the cells occupied by ants and the empty cells
+                update_pheromone();
 
                 curr_time += dt; // advance time
         }
