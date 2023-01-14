@@ -113,53 +113,21 @@ void AntColonySystem::initialize_system()
 // or -1 to stay where you are
 int AntColonySystem::choose_next_cell(const grid_cell_t** arr, int n)
 {
-        std::vector<int> max_vec;
-        int first_empty_cell_idx = -1;
-        
-        // find the first valid and non-occupied neighboring cell
-        for (int i = 0; i < n; i++)
+        const grid_cell_t* max_cell = nullptr;
+        int max_idx = -1;
+
+        for (int i = 0; i < n; i++) // iterate through the neighboring cells
         {
-                if(arr[i] != nullptr && arr[i]->cell_ants == 0)
-                {
-                        first_empty_cell_idx = -1; 
-                        break;
-                }
+                if( arr[i] != nullptr
+                        && arr[i]->cell_ants == 0
+                        && (max_cell == nullptr 
+                        || arr[i]->pher_amount > max_cell->pher_amount))
+                  {
+                        max_cell = arr[i];
+                        max_idx = i;
+                  }
         }
-
-        // If there is no empty neighbouring cell or the first empty cell is the last one
-        if (first_empty_cell_idx == -1 || first_empty_cell_idx == static_cast<int>(n - 1))
-                return first_empty_cell_idx;
-        
-        std::size_t max_cell_idx = first_empty_cell_idx;
-        max_vec.push_back(max_cell_idx);
-
-        // There are more than 1 neighbouring cells that are not currently occupied
-        // Pick the one with the maximum amount of pheromone and move there
-        for (int i = first_empty_cell_idx + 1; i < n; i++)
-        {
-                // skip over dummy or occupied cells
-                if (arr[i] == nullptr || arr[i]->cell_ants) continue;
-
-                // Preserve all the neighbours that have the same max amount of pheromone
-                // so you may later decide in which one to move onto
-                // if(arr[max_cell_idx]->pher_amount == arr[i]->pher_amount)
-                if(std::abs(arr[max_cell_idx]->pher_amount - arr[i]->pher_amount) < 1e-7)
-                        max_vec.push_back(i);
-                else if(arr[max_cell_idx]->pher_amount < arr[i]->pher_amount)
-                {
-                        max_cell_idx = i; // set the new max
-                        max_vec.clear(); // reset the vector
-                        max_vec.push_back(i);
-                }
-        }
-
-        /* Choose the cell with the maximum amount of pheromone to move onto.
-         * The choice is either random  (if all the neighboring cells have the same amount of
-         * pheromone) or not random (if there is only one cell with the max amount of pheromone.
-         * In this case, valid_count = 1, therefore mod valid_count gives as 0, so we select
-         * the first element of the max_vec, which is the one max pheromone cell)
-         */
-        return max_vec[rand() % max_vec.size()];
+        return max_idx;
 }
 
 void AntColonySystem::move_ants()
