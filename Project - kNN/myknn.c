@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
+#include "func.h"
 
 #ifndef PROBDIM
 #define PROBDIM 2
@@ -9,38 +10,31 @@
 
 #define DEBUG 1
 
-#include "func.h"
-
 static double **xdata;
 static double ydata[TRAINELEMS];
 
-#define MAX_NNB	256
+// #define MAX_NNB	256
 
 double find_knn_value(double *p, int n, int knn)
 {
-	int nn_x[MAX_NNB];
-	double nn_d[MAX_NNB];
+	// int nn_x[MAX_NNB];
+	// double nn_d[MAX_NNB];	
+	int nn_x[knn];
+	double nn_d[knn];
 
-	compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force /linear search
+	compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force / linear search
 
-	int dim = PROBDIM;
-	int nd = knn;   // number of points
-	double xd[MAX_NNB*PROBDIM];   // points
-	double fd[MAX_NNB];     // function values
+	double xd[knn * PROBDIM];     // the knn neighboring points/vectors of size PROBDIM
+	double fd[knn];	      	      // function values for the knn neighbors
 
 	for (int i = 0; i < knn; i++)
 		fd[i] = ydata[nn_x[i]];
-	
 
 	for (int i = 0; i < knn; i++) 
-		for (int j = 0; j < PROBDIM; j++) 
-			xd[i*dim+j] = xdata[nn_x[i]][j];
+		for (int j = 0; j < PROBDIM; j++)
+			xd[i * PROBDIM + j] = xdata[nn_x[i]][j];
 
-	double fi;
-
-	fi = predict_value(dim, nd, xd, fd, p, nn_d);
-
-	return fi;
+	return predict_value(PROBDIM, knn, xd, fd, p, nn_d);
 }
 
 int main(int argc, char *argv[])
@@ -63,7 +57,6 @@ int main(int argc, char *argv[])
 
 	for (int i = 0; i < TRAINELEMS; i++)
 		xdata[i] = mem + i * (PROBDIM + 1); //&mem[i*PROBDIM];
-
 
 	for (int i = 0; i < TRAINELEMS; i++)
 	{
