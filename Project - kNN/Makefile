@@ -16,13 +16,13 @@ all: gendata myknn
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
 
-gendata.o: gendata.c func.c
+gendata.o: gendata.c 
 	gcc $(CFLAGS) -c gendata.c
 
 myknn: myknn.o
 	gcc -o myknn myknn.o $(LDFLAGS)
 
-myknn.o: myknn.c func.c
+myknn.o: myknn.c
 	gcc $(CFLAGS) -c myknn.c
 
 clean:

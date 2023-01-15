@@ -7,12 +7,13 @@
 #define PROBDIM 2
 #endif
 
-#include "func.c"
+#include "func.h"
+
 
 int main(int argc, char *argv[])
 {
-	double x[PROBDIM], y;
-	FILE *fp;
+	// Allocate enough space to store either training data or query data
+	double *mem = (double *)malloc(fmax(TRAINELEMS, QUERYELEMS) * (PROBDIM + 1) * sizeof(double));
 
 	if (argc != 3)
 	{
@@ -25,39 +26,30 @@ int main(int argc, char *argv[])
 
 	SEED_RAND();	/* the training set is fixed */
 
-	fp = fopen(trainfile, "w");
-
-	for (int i=0;i<TRAINELEMS;i++)
+	// Initialize mem for training data
+	for (int i = 0; i < TRAINELEMS; i++)
 	{
 		for (int k = 0; k < PROBDIM; k++)
-			x[k] = get_rand(k);
+			mem[i * (PROBDIM + 1) + k] = get_rand(k);
 
-		y = fitfun(x, PROBDIM);
-
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fp,"%.6f ", x[k]);
-
-		fprintf(fp,"%.6f\n", y);
+		mem[i * (PROBDIM + 1) + PROBDIM] = fitfun(&mem[i * (PROBDIM + 1)], PROBDIM);
 	}
 
-	fclose(fp);
+	store_binary_data(trainfile, mem, TRAINELEMS * (PROBDIM + 1));
 	printf("%d data points written to %s!\n", TRAINELEMS, trainfile);
 
-	fp = fopen(queryfile, "w");
-	for (int i=0;i<QUERYELEMS;i++)
+	// Initialize mem for query data
+	for (int i = 0; i < QUERYELEMS; i++)
 	{
 		for (int k = 0; k < PROBDIM; k++)
-			x[k] = get_rand(k);
+			mem[i * (PROBDIM + 1) + k] = get_rand(k);
 
-		y = fitfun(x, PROBDIM);
-
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fp,"%.6f ", x[k]);
-
-		fprintf(fp,"%.6f\n", y);
+		mem[i * (PROBDIM + 1) + PROBDIM] = fitfun(&mem[i * (PROBDIM + 1)], PROBDIM);
 	}
-	fclose(fp);
+
+	store_binary_data(queryfile, mem, QUERYELEMS * (PROBDIM + 1));
 	printf("%d data points written to %s!\n", QUERYELEMS, queryfile);
 
+	free(mem);
 	return 0;
 }

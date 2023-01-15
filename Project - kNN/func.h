@@ -2,30 +2,35 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
+#include <assert.h>
 
 /* I/O routines */
-FILE *open_traindata(char *trainfile)
+void store_binary_data(char *filename, double *data, int n)
 {
 	FILE *fp;
-
-	fp = fopen(trainfile, "r");
-	if (fp == NULL) {
-		printf("traindata; File %s not available\n", trainfile);
+	fp = fopen(filename, "wb");
+	if (fp == NULL)
+	{
+		printf("fopen(%s, \"wb\") FAILED!\n", filename);
 		exit(1);
 	}
-	return fp;
+	size_t nelems = fwrite(data, sizeof(double), n, fp);
+	assert(nelems == n); // check that all elements were actually written
+	fclose(fp);
 }
 
-FILE *open_querydata(char *queryfile)
+void load_binary_data(const char *filename, double *data, const int n)
 {
 	FILE *fp;
-
-	fp = fopen(queryfile, "r");
-	if (fp == NULL) {
-		printf("querydata: File %s not available\n", queryfile);
+	fp = fopen(filename, "rb");
+	if (fp == NULL)
+	{
+		printf("fopen(%s, \"wb\") FAILED!\n", filename);
 		exit(1);
 	}
-	return fp;
+	size_t nelems = fread(data, sizeof(double), n, fp);
+	assert(nelems == n); // check that all elements were actually read
+    	fclose(fp);
 }
 
 double read_nextnum(FILE *fp)
