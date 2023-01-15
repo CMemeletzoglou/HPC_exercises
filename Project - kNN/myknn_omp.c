@@ -60,11 +60,11 @@ int main(int argc, char *argv[])
 
 	for (int i = 0; i < TRAINELEMS; i++)
 	{
-#if defined(SURROGATES)
+        #if defined(SURROGATES)
 		ydata[i] = mem[i * (PROBDIM + 1) + PROBDIM];
-#else
+        #else
 		ydata[i] = 0;
-#endif
+        #endif
 	}
 
 	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
@@ -75,37 +75,41 @@ int main(int argc, char *argv[])
 	double *y = malloc(QUERYELEMS * sizeof(double));
 
 	double t0, t1, t_first = 0.0, t_sum = 0.0;
-	double sse = 0.0;
-	double err, err_sum = 0.0;
-	
-	for (int i = 0; i < QUERYELEMS; i++)
-	{	/* requests */
-#if defined(SURROGATES)
-		y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
-#else
-		y[i] = 0.0;
-#endif
-		t0 = gettime();
-		double yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
-		t1 = gettime();
-		t_sum += (t1-t0);
-		if (i == 0)
-			t_first = (t1-t0);
+        double sse = 0.0;
+        double err, err_sum = 0.0;
 
-		sse += (y[i] - yp) * (y[i] - yp);
+        #pragma omp parallel for reduction(+ : sse, err_sum) private(t0, t1)
+        for (int i = 0; i < QUERYELEMS; i++)
+        {	/* requests */
+        #if defined(SURROGATES)
+                y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
+        #else
+                y[i] = 0.0;
+        #endif
+                t0 = gettime();
+                double yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
+                t1 = gettime();
 
-#if DEBUG
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-#endif
+                #pragma omp atomic
+                t_sum += (t1-t0);
 
-		err = 100.0 * fabs((yp - y[i]) / y[i]);
+                if (i == 0)
+                        t_first = (t1-t0);
 
-#if DEBUG
-		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
-#endif
-		err_sum += err;
-	}
+                sse += (y[i] - yp) * (y[i] - yp);
+
+        #if DEBUG
+                for (int k = 0; k < PROBDIM; k++)
+                        fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
+        #endif
+
+                err = 100.0 * fabs((yp - y[i]) / y[i]);
+
+        #if DEBUG
+                fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
+        #endif
+                err_sum += err;
+        }
 
 	double mse = sse / QUERYELEMS;
 	double ymean = compute_mean(y, QUERYELEMS);

@@ -6,12 +6,11 @@ QUE ?= 1024
 LOW ?=  0
 HIGH ?= 2
 
-
 CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -ggdb -O3
 CFLAGS += -DSURROGATES -Wall
-LDFLAGS += -lm
+LDFLAGS += -lm 
 
-all: gendata myknn
+all: gendata myknn myknn_omp
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -25,5 +24,11 @@ myknn: myknn.o
 myknn.o: myknn.c
 	gcc $(CFLAGS) -c myknn.c
 
+myknn_omp: myknn_omp.o
+	gcc -o myknn_omp myknn_omp.o $(LDFLAGS) -fopenmp
+
+myknn_omp.o: myknn_omp.c
+	gcc $(CFLAGS) -fopenmp -c myknn_omp.c
+
 clean:
-	rm -f myknn *.o gendata
+	rm -f myknn *.o gendata myknn_omp
