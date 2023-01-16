@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <x86intrin.h>
 
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
@@ -301,11 +302,59 @@ void compute_knn_brute_force(double **xdata, double *q, int npat, int lpat, int 
 /* compute an approximation based on the values of the neighbors */
 double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
 {
-	int i;
-	double sum_v = 0.0;
-	// plain mean (other possible options: inverse distance weight, closest value inheritance)
-	for (i = 0; i < knn; i++)
-		sum_v += ydata[i];
+	// int i;
+	// double sum_v = 0.0;
+	// // plain mean (other possible options: inverse distance weight, closest value inheritance)
+	// for (i = 0; i < knn; i++)
+	// 	sum_v += ydata[i];
 
-	return sum_v / knn;
+	// return sum_v / knn;
+
+	// plain mean (other possible options: inverse distance weight, closest value inheritance)
+	// double sum_v = 0.0;
+
+	// assume 32-byte alignment of ydata vector
+	__builtin_assume_aligned(ydata, 32);
+
+	// helper 16-byte aligned array to store the final two sum values
+	__attribute__((aligned(16))) double sum_values[2];
+
+	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg
+	__m256d _ydata;
+	int knn_div4 = knn / 4;
+
+	for (int i = 0; i < knn_div4; i++)
+	{
+		_ydata = _mm256_load_pd(ydata + 4 * i); // load groups of 4 elements of the vector 
+		_sum_v = _mm256_add_pd(_sum_v, _ydata); // vertically add them into the sum vector reg
+	}
+	/* After the for 4-stride for loop finished, the _sum_v vector register contains:
+	 * 			s0 || s1 || s2 || s3
+	 * These values need to be added together (reduced) to produce the final vector sum value.
+	 * Use _mm256_extractf128_pd(_hsum, 0) to extract the lower 128-bit part s0 || s1 and
+	 * _mm256_extractf128_pd(_hsum, 1) to extract the upper 128-bit part s2 || s3.
+	 * Then use two SSE horizontal additions to execute the final reduction
+	 */
+
+	// sum the 4 elements of the sum vector to get the final sum value
+
+	// ***************************************
+	// 	AVX instructions-only way
+	// ***************************************
+	// __m256d _hsum = _mm256_hadd_pd(_sum_v, _sum_v);
+	// __m128d _total_sum = _mm_add_pd(_mm256_extractf128_pd(_hsum, 1), _mm256_castpd256_pd128(_hsum));
+
+	__m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
+        _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
+
+	_mm_store_pd(sum_values, _total_sum);
+	// handle the remaining entries
+	double sum = 0.0f;
+	for (int i = knn_div4 * 4; i < knn; i++)
+		sum += ydata[i];
+
+	sum_values[1] = sum;
+
+	return (sum_values[0] + sum_values[1]) / knn;
+	// return sum_v / knn;
 }
