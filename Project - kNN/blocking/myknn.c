@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 #endif
 	double *y = malloc(QUERYELEMS * sizeof(double));
 
-	double t0, t1;
+	double t0, t1, t2, t3, t_sum;
 	double sse = 0.0;
 	double err, err_sum = 0.0;
 	
@@ -96,10 +96,15 @@ int main(int argc, char *argv[])
 		}
 	}
 	t1 = gettime();
+	t_sum = t1 - t0;
 
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
+		t2 = gettime();
 		double yp = find_knn_value(&(queries[i]), NNBS);
+		t3 = gettime();
+		t_sum += t3 - t2;
+		
 		sse += (y[i] - yp) * (y[i] - yp);
 		err = 100.0 * fabs((yp - y[i]) / y[i]);
 
@@ -119,8 +124,8 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	printf("Total time = %lf ms\n", t1 - t0);
-	printf("Average time/query = %lf ms\n", (t1 - t0) / QUERYELEMS);
+	printf("Total time = %lf sec\n", t_sum);
+	printf("Average time/query = %lf sec\n", t_sum / QUERYELEMS);
 
 	free(mem);
 	free(xdata);
