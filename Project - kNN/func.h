@@ -1,3 +1,5 @@
+#include <emmintrin.h>
+#include <immintrin.h>
 #include <sys/time.h>
 #include <stdio.h>
 #include <math.h>
@@ -167,6 +169,41 @@ double compute_var(double *v, int n, double mean)
 
 double compute_dist(double *v, double *w, int n)
 {
+#if defined (SIMD)	
+	__builtin_assume_aligned(v, 32);
+	__builtin_assume_aligned(w, 32);
+
+	// check for 32-Byte alignment
+	assert( (((size_t)v & 0x1F) == 0) && (((size_t)w & 0x1F) == 0) );	
+
+	__attribute__((aligned(16))) double sum_values[2];
+
+	int ndiv4 = n / 4;
+	__m256d _sum_v = _mm256_setzero_pd();
+	__m256d _v, _w, _diff;
+	for (int i = 0; i < ndiv4; i++)
+	{
+		_v = _mm256_load_pd(v + i * 4);
+                _w = _mm256_load_pd(w + i * 4);
+		_diff = _mm256_sub_pd(_v, _w);
+		_diff = _mm256_mul_pd(_diff, _diff); // diff squared
+		_sum_v = _mm256_add_pd(_sum_v, _diff); // add to sum vector reg
+	}
+
+	// reduce the vector's 4 elements into one, using two SSE horizontal additions
+	__m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
+        _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
+	_mm_store_pd(sum_values, _total_sum);
+
+	// handle the remaining entries
+	double sum = 0.0f;
+	for (int i = ndiv4 * 4; i < n; i++)
+		sum += pow(v[i] - w[i], 2);
+
+        sum_values[1] = sum;
+
+        return sqrt(sum_values[0] + sum_values[1]);
+#else
 	int i;
 	double s = 0.0;
 	for (i = 0; i < n; i++) {
@@ -174,6 +211,7 @@ double compute_dist(double *v, double *w, int n)
 	}
 
 	return sqrt(s);
+#endif
 }
 
 double compute_max_pos(double *v, int n, int *pos)
@@ -302,19 +340,14 @@ void compute_knn_brute_force(double **xdata, double *q, int npat, int lpat, int 
 /* compute an approximation based on the values of the neighbors */
 double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
 {
-	// int i;
-	// double sum_v = 0.0;
-	// // plain mean (other possible options: inverse distance weight, closest value inheritance)
-	// for (i = 0; i < knn; i++)
-	// 	sum_v += ydata[i];
-
-	// return sum_v / knn;
-
+#if defined (SIMD)
 	// plain mean (other possible options: inverse distance weight, closest value inheritance)
-	// double sum_v = 0.0;
 
 	// assume 32-byte alignment of ydata vector
 	__builtin_assume_aligned(ydata, 32);
+
+	// check for 16-Byte alignment
+	assert( (((size_t)ydata & 0x1F) == 0) );
 
 	// helper 16-byte aligned array to store the final two sum values
 	__attribute__((aligned(16))) double sum_values[2];
@@ -346,8 +379,8 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 
 	__m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
         _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
-
 	_mm_store_pd(sum_values, _total_sum);
+
 	// handle the remaining entries
 	double sum = 0.0f;
 	for (int i = knn_div4 * 4; i < knn; i++)
@@ -356,5 +389,12 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 	sum_values[1] = sum;
 
 	return (sum_values[0] + sum_values[1]) / knn;
-	// return sum_v / knn;
+#else
+	int i;
+	double sum_v = 0.0;
+	for (i = 0; i < knn; i++)
+		sum_v += ydata[i];
+
+	return sum_v / knn;
+#endif
 }

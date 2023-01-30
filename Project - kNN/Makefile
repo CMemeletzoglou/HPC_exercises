@@ -24,6 +24,12 @@ myknn: myknn.o
 myknn.o: myknn.c
 	gcc $(CFLAGS) -c myknn.c
 
+myknn_simd: myknn_simd.o
+	gcc -o myknn_simd myknn_simd.o $(LDFLAGS)
+
+myknn_simd.o: myknn_simd.c
+	gcc -DSIMD $(CFLAGS) -mavx2 -march=native -c myknn_simd.c
+
 myknn_omp: myknn_omp.o
 	gcc -o myknn_omp myknn_omp.o $(LDFLAGS) -fopenmp
 
@@ -31,4 +37,4 @@ myknn_omp.o: myknn_omp.c
 	gcc $(CFLAGS) -fopenmp -c myknn_omp.c
 
 clean:
-	rm -f myknn *.o gendata myknn_omp
+	rm -f myknn *.o gendata myknn_omp myknn_simd
