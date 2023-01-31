@@ -9,17 +9,11 @@
 #define PROBDIM 2
 #endif
 
-#define DEBUG 1
-
 static double **xdata;
 static double ydata[TRAINELEMS];
 
-// #define MAX_NNB	256
-
 double find_knn_value(double *p, int n, int knn)
 {
-	// int nn_x[MAX_NNB];
-	// double nn_d[MAX_NNB];	
 	int nn_x[knn];
 	double nn_d[knn];
 
@@ -73,8 +67,8 @@ int main(int argc, char *argv[])
 
 	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
 
-#if DEBUG
-	FILE *fpout = fopen("output.knn.txt","w");
+#if defined(DEBUG)
+	FILE *fpout = fopen("output.knn_omp.txt","w");
 #endif
 	double *y = malloc(QUERYELEMS * sizeof(double));
 
@@ -89,14 +83,21 @@ int main(int argc, char *argv[])
 
 	double t0, t1, t_start, t_end, t_first = 0.0, t_sum = 0.0;
         double sse = 0.0;
-        double err, err_sum = 0.0;
+        double err_sum = 0.0;
+
+	// -------------------------------------
+	// -------------new arrays (?)----------
+	// -------------------------------------
+#if defined(DEBUG)
+	double *yp_vals = malloc(QUERYELEMS * sizeof(double));
+	double *err_vals = malloc(QUERYELEMS * sizeof(double));
+#endif
 
 	size_t nthreads;
 
 	t_start = gettime();
-	#pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1, err) 
+	#pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1) 
 	{
-		double yp;
 		size_t tid = omp_get_thread_num();
 
 		#pragma omp single
@@ -106,35 +107,58 @@ int main(int argc, char *argv[])
 		size_t end = (tid + 1) * (QUERYELEMS / nthreads);
 		if (tid == nthreads - 1)
 			end = QUERYELEMS;
-
+	
+	#if defined(DEBUG)
+		double yp[end - start + 1], err[end - start + 1];
+		size_t idx = 0;
+	#else
+		double yp;
+	#endif
 		for (int i = start; i < end; i++) 	/* requests */
 		{
 			t0 = gettime();
+		#if defined(DEBUG)
+                	yp[idx] = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
+		#else
                 	yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
+		#endif
                 	t1 = gettime();
 
 			t_sum += (t1 - t0);
 			
 			if (i == 0)
 				t_first = (t1 - t0);
-
+		#if defined(DEBUG)
+			sse += (y[i] - yp[idx]) * (y[i] - yp[idx]);
+			err[idx] = 100.0 * fabs((yp[idx] - y[i]) / y[i]);
+			err_sum += err[idx];
+			idx++;
+		#else
 			sse += (y[i] - yp) * (y[i] - yp);
-
-        	#if DEBUG
-	                for (int k = 0; k < PROBDIM; k++)
-        	                fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-        	#endif
-
-                	err = 100.0 * fabs((yp - y[i]) / y[i]);
-
-        	#if DEBUG
-                	fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
-        	#endif
-                
-			err_sum += err;
+			err_sum += 100.0 * fabs((yp - y[i]) / y[i]);
+		#endif
 		}
+	#if defined(DEBUG)
+		idx = 0;
+		for (int i = start; i < end; i++)
+		{
+			yp_vals[i] = yp[idx];
+			err_vals[i] = err[idx++];
+		}
+	#endif
 	}
 	t_end = gettime();
+
+#if defined(DEBUG)
+	for (int i = 0; i < QUERYELEMS; i++)
+	{
+		for (int k = 0; k < PROBDIM; k++)
+			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
+
+		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp_vals[i], err_vals[i]);
+	}
+#endif
+
 
 	double mse = sse / QUERYELEMS;
 	double ymean = compute_mean(y, QUERYELEMS);
@@ -155,6 +179,10 @@ int main(int argc, char *argv[])
 	free(xdata);
 	free(query_mem);
 	free(y);
+
+	// new
+	free(yp_vals);
+	free(err_vals);
 
 	return 0;
 }

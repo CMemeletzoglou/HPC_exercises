@@ -8,8 +8,6 @@
 #define PROBDIM 2
 #endif
 
-#define DEBUG 1
-
 static double **xdata;
 static double ydata[TRAINELEMS];
 
@@ -69,7 +67,7 @@ int main(int argc, char *argv[])
 
 	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
 
-#if DEBUG
+#if defined(DEBUG)
 	FILE *fpout = fopen("output.knn.txt","w");
 #endif
 	double *y = malloc(QUERYELEMS * sizeof(double));
@@ -94,14 +92,14 @@ int main(int argc, char *argv[])
 
 		sse += (y[i] - yp) * (y[i] - yp);
 
-#if DEBUG
+#if defined(DEBUG)
 		for (int k = 0; k < PROBDIM; k++)
 			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
 #endif
 
 		err = 100.0 * fabs((yp - y[i]) / y[i]);
 
-#if DEBUG
+#if defined(DEBUG)
 		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
 #endif
 		err_sum += err;
@@ -117,12 +115,10 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	t_sum = t_sum * 1000.0;		// convert to ms
-	t_first = t_first * 1000.0;	// convert to ms
-	printf("Total time = %lf ms\n", t_sum);
-	printf("Time for 1st query = %lf ms\n", t_first);
-	printf("Time for 2..N queries = %lf ms\n", t_sum - t_first);
-	printf("Average time/query = %lf ms\n", (t_sum - t_first) / (QUERYELEMS - 1));
+	printf("Total time = %lf secs\n", t_sum);
+	printf("Time for 1st query = %lf secs\n", t_first);
+	printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
+	printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
 
 	free(mem);
 	free(xdata);
