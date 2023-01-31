@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
+#include <omp.h>
 #include "func.h"
 
 #ifndef PROBDIM
@@ -45,6 +46,9 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	omp_set_dynamic(0); // set OpenMP dynamic mode to false, i.e. use the explicitly defined number of threads
+	omp_set_num_threads(omp_get_max_threads()); // run using the maximum supported number of threads
+
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
 
@@ -74,42 +78,62 @@ int main(int argc, char *argv[])
 #endif
 	double *y = malloc(QUERYELEMS * sizeof(double));
 
-	double t0, t1, t_first = 0.0, t_sum = 0.0;
-        double sse = 0.0;
-        double err, err_sum = 0.0;
-
-        #pragma omp parallel for reduction(+ : sse, err_sum) private(t0, t1)
-        for (int i = 0; i < QUERYELEMS; i++)
-        {	/* requests */
-        #if defined(SURROGATES)
+	for (int i = 0; i < QUERYELEMS; i++)
+	{
+	#if defined(SURROGATES)
                 y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
         #else
                 y[i] = 0.0;
         #endif
-                t0 = gettime();
-                double yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
-                t1 = gettime();
+	}
 
-                #pragma omp atomic
-                t_sum += (t1-t0);
+	double t0, t1, t_start, t_end, t_first = 0.0, t_sum = 0.0;
+        double sse = 0.0;
+        double err, err_sum = 0.0;
 
-                if (i == 0)
-                        t_first = (t1-t0);
+	size_t nthreads;
 
-                sse += (y[i] - yp) * (y[i] - yp);
+	t_start = gettime();
+	#pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1, err) 
+	{
+		size_t tid = omp_get_thread_num();
 
-        #if DEBUG
-                for (int k = 0; k < PROBDIM; k++)
-                        fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-        #endif
+		#pragma omp single
+		nthreads = omp_get_num_threads();
 
-                err = 100.0 * fabs((yp - y[i]) / y[i]);
+		size_t start = tid * (QUERYELEMS / nthreads);
+		size_t end = (tid + 1) * (QUERYELEMS / nthreads);
+		if (tid == nthreads - 1)
+			end = QUERYELEMS;
 
-        #if DEBUG
-                fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
-        #endif
-                err_sum += err;
-        }
+		for (int i = start; i < end; i++) 	/* requests */
+		{
+			t0 = gettime();
+                	double yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
+                	t1 = gettime();
+
+			t_sum += (t1 - t0);
+
+			if (i == 0)
+				t_first = (t1 - t0);
+
+			sse += (y[i] - yp) * (y[i] - yp);
+
+        	#if DEBUG
+	                for (int k = 0; k < PROBDIM; k++)
+        	                fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
+        	#endif
+
+                	err = 100.0 * fabs((yp - y[i]) / y[i]);
+
+        	#if DEBUG
+                	fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
+        	#endif
+                
+			err_sum += err;
+		}
+	}
+	t_end = gettime();
 
 	double mse = sse / QUERYELEMS;
 	double ymean = compute_mean(y, QUERYELEMS);
@@ -121,9 +145,7 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	t_sum = t_sum * 1000.0;		// convert to ms
-	t_first = t_first * 1000.0;	// convert to ms
-	printf("Total time = %lf ms\n", t_sum);
+	printf("Total time = %lf ms\n", t_end - t_start);
 	printf("Time for 1st query = %lf ms\n", t_first);
 	printf("Time for 2..N queries = %lf ms\n", t_sum - t_first);
 	printf("Average time/query = %lf ms\n", (t_sum - t_first) / (QUERYELEMS - 1));

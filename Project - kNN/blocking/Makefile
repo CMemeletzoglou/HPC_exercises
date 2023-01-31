@@ -8,7 +8,7 @@ LOW ?=  0
 HIGH ?= 2
 
 CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -ggdb -O3
-CFLAGS += -DSURROGATES -Wall
+CFLAGS += -DSURROGATES -Wall 
 LDFLAGS += -lm 
 
 all: gendata myknn
@@ -33,4 +33,4 @@ run_myknn:
 
 clean:
 	rm -f myknn *.o gendata
-	rm q.txt t.txt output.knn.txt
+	rm output.knn.txt
