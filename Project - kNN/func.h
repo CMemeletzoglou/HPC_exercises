@@ -39,10 +39,14 @@ void load_binary_data(const char *filename, double *data, const int n)
 
 #if defined(MPI)
 
-void load_binary_data_mpi(const char *filename, double *data, const int rank, const int N)
+void load_binary_data_mpi(const char *filename, double *data, const int qelems, const int probdim, const int N)
 {
-        // Open the file (collective call)
-        MPI_File f;
+	int rank, nprocs;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
+	// Open the file (collective call)
+	MPI_File f;
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
 
         // Calculate the offset for each rank
@@ -52,9 +56,13 @@ void load_binary_data_mpi(const char *filename, double *data, const int rank, co
 	MPI_Offset data_len = N * sizeof(double);
 	MPI_Offset offset = rank * data_len; // rank offset
 
+	int num_elems = N;
+	if (rank == nprocs - 1)
+		num_elems += (qelems % nprocs) * (probdim + 1);
+
 	// Read the data
         MPI_Status status;
-        MPI_File_read_at_all(f, base + offset, data, N, MPI_DOUBLE, &status); // blocking collective call
+        MPI_File_read_at_all(f, base + offset, data, num_elems, MPI_DOUBLE, &status); // blocking collective call
 
         // Close the file
         MPI_File_close(&f);        
