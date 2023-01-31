@@ -1,11 +1,12 @@
 #include <emmintrin.h>
 #include <immintrin.h>
+#include <x86intrin.h>
 #include <sys/time.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <x86intrin.h>
+#include <mpi.h>
 
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
@@ -35,6 +36,31 @@ void load_binary_data(const char *filename, double *data, const int n)
 	assert(nelems == n); // check that all elements were actually read
     	fclose(fp);
 }
+
+#if defined(MPI)
+
+void load_binary_data_mpi(const char *filename, double *data, const int rank, const int N)
+{
+        // Open the file (collective call)
+        MPI_File f;
+        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
+
+        // Calculate the offset for each rank
+        MPI_Offset base;
+        MPI_File_get_position(f, &base);
+
+	MPI_Offset data_len = N * sizeof(double);
+	MPI_Offset offset = rank * data_len; // rank offset
+
+	// Read the data
+        MPI_Status status;
+        MPI_File_read_at_all(f, base + offset, data, N, MPI_DOUBLE, &status); // blocking collective call
+
+        // Close the file
+        MPI_File_close(&f);        
+}
+
+#endif
 
 double read_nextnum(FILE *fp)
 {
