@@ -96,6 +96,7 @@ int main(int argc, char *argv[])
 	t_start = gettime();
 	#pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1, err) 
 	{
+		double yp;
 		size_t tid = omp_get_thread_num();
 
 		#pragma omp single
@@ -109,11 +110,11 @@ int main(int argc, char *argv[])
 		for (int i = start; i < end; i++) 	/* requests */
 		{
 			t0 = gettime();
-                	double yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
+                	yp = find_knn_value(&query_mem[i * (PROBDIM + 1)], PROBDIM, NNBS);
                 	t1 = gettime();
 
 			t_sum += (t1 - t0);
-
+			
 			if (i == 0)
 				t_first = (t1 - t0);
 
@@ -147,7 +148,7 @@ int main(int argc, char *argv[])
 
 	printf("Total time = %lf ms\n", t_end - t_start);
 	printf("Time for 1st query = %lf ms\n", t_first);
-	printf("Time for 2..N queries = %lf ms\n", t_sum - t_first);
+	printf("Time for 2..N queries = %lf ms\n", t_end - t_start - t_first);
 	printf("Average time/query = %lf ms\n", (t_sum - t_first) / (QUERYELEMS - 1));
 
 	free(mem);
