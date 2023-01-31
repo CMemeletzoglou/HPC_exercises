@@ -54,10 +54,8 @@ int main(int argc, char *argv[])
 	load_binary_data(trainfile, mem, TRAINELEMS*(PROBDIM+1));
 
 	for (int i = 0; i < TRAINELEMS; i++)
-		xdata[i] = mem + i * (PROBDIM + 1); //&mem[i*PROBDIM];
-
-	for (int i = 0; i < TRAINELEMS; i++)
 	{
+		xdata[i] = mem + i * (PROBDIM + 1); //&mem[i*PROBDIM];
         #if defined(SURROGATES)
 		ydata[i] = mem[i * (PROBDIM + 1) + PROBDIM];
         #else
@@ -66,6 +64,15 @@ int main(int argc, char *argv[])
 	}
 
 	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
+
+	for (int i = QUERYELEMS-19; i < QUERYELEMS; i++)
+	{
+		printf("point %d: ", i);
+		for (int j = 0; j < PROBDIM; j++)
+			printf("%.4f ", query_mem[i * (PROBDIM + 1) + j]);
+
+		printf("\n");
+	}
 
 #if defined(DEBUG)
 	FILE *fpout = fopen("output.knn_omp.txt","w");
@@ -181,8 +188,10 @@ int main(int argc, char *argv[])
 	free(y);
 
 	// new
+#if defined(DEBUG)
 	free(yp_vals);
 	free(err_vals);
+#endif
 
 	return 0;
 }
