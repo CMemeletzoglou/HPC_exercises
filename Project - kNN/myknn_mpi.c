@@ -59,6 +59,8 @@ int main(int argc, char *argv[])
         if(rank == nprocs - 1)
                 local_qelems += QUERYELEMS % nprocs;
 
+        int chunk_size = QUERYELEMS / nprocs;
+
         // allocate space for the rank's query points
         double *query_mem = (double *)malloc(local_qelems * (PROBDIM + 1) * sizeof(double));
 
@@ -76,7 +78,7 @@ int main(int argc, char *argv[])
 
         // load the local_qelems query points for each rank, in an MPI I/O way
         // load_binary_data_mpi(queryfile, query_mem, rank, local_qelems * (PROBDIM + 1));
-        load_binary_data_mpi(queryfile, query_mem, QUERYELEMS, PROBDIM, (QUERYELEMS/nprocs) * (PROBDIM + 1));
+        load_binary_data_mpi(queryfile, query_mem, QUERYELEMS, PROBDIM, chunk_size * (PROBDIM + 1));
 
 #if defined(DEBUG)
         MPI_File f;
@@ -84,19 +86,22 @@ int main(int argc, char *argv[])
 #endif
         // allocate space for the target function values for the rank's query points
 	double *y = malloc(local_qelems * sizeof(double));
+        // double local_ysum = 0.0f;
 
         for (int i = 0; i < local_qelems; i++)
         {
 #if defined(SURROGATES)
-                y[i] = query_mem[(rank * local_qelems) + (i * (PROBDIM + 1) + PROBDIM)];
+                y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
 #else
                 y[i] = 0.0;
 #endif
+                // local_ysum += y[i];
         }
 
-	double t0, t1, t_start, t_end, t_first = 0.0f, t_sum = 0.0f;
+        double t0, t1, t_start, t_end, t_first = 0.0f, t_sum = 0.0f;
         double local_sse = 0.0f, total_sse = 0.0f;
         double local_err = 0.0f, total_err = 0.0f;
+        double total_r2;
 
         if(rank == 0)
                 t_start = gettime();
@@ -121,34 +126,63 @@ int main(int argc, char *argv[])
 // #endif
 
 		local_err += 100.0 * fabs((yp - y[i]) / y[i]);
-
 // #if defined(DEBUG)
 // 		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
 // #endif
 		// err_sum += err;
 	}
 
-        printf("Rank %d has total error = %.5f and total sse = %.5f\n", rank, local_err, local_sse);
-
-
         MPI_Barrier(MPI_COMM_WORLD);
-        MPI_Reduce(&local_err, &total_err, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); // reduce the local err vars
-        MPI_Reduce(&local_sse, &total_sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); // reduce the local sse vars
+
+        MPI_Allreduce(&local_sse, &total_sse, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD); // reduce the local sse vars        
+        double mse = total_sse / QUERYELEMS;
+
+        /* The problem here is that some error metrics used below, cannot be calculated from the 
+         * global query array pieces, that each rank has. For example, while there is a workaround
+         * for the calculation of ymean, using the helper variable local_ysum (see line 98),
+         * there is no such workaround for the calculation of var, where the mean must be known.
+         * So at this point, we can either run each rank's query vector and calculate the sum
+         * of the squared differences of each element from the vector's mean, then reduce them
+         * and them calculate the total var
+         * 
+         * or
+         * 
+         * gather the query vector into rank 0, and perform the calculation there..
+         * This gather operation seems inevitable...
+         */
+        double *query_buf = NULL;
+        int *rcounts = NULL;
+        int *displs = NULL;
+        if (rank == 0)
+        {
+                query_buf = (double *)malloc(QUERYELEMS * (PROBDIM + 1) * sizeof(double));
+                rcounts = (int *)malloc(nprocs * sizeof(int));
+                displs = (int *)malloc(nprocs * sizeof(int));
+
+                for (int i = 0; i < nprocs; i++)
+                {
+                        rcounts[i] = local_qelems;
+                        displs[i] = 0;
+                }
+                
+        }
+
+        MPI_Gatherv(y, local_qelems, MPI_DOUBLE, query_buf, rcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
         if(rank == 0) // only rank 0 prints
         {
                 t_end = gettime();
-                // printf("Rank 0 has total error = %.5f and total sse = %.5f\n", total_err, total_sse);
 
-                double mse = total_sse / QUERYELEMS;
-                double ymean = compute_mean(y, QUERYELEMS);
-                double var = compute_var(y, QUERYELEMS, ymean);
-                double r2 = 1 - (mse / var);
+                double t_sum = t_end - t_start;
+
+                double ymean = compute_mean(query_buf, QUERYELEMS);
+                printf("ymean = %.5f\n", ymean);
+
 
                 printf("Results for %d query points\n", QUERYELEMS);
                 printf("APE = %.2f %%\n", total_err / QUERYELEMS);
                 printf("MSE = %.6f\n", mse);
-                printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
+                printf("R2 = 1 - (MSE/Var) = %.6lf\n", total_r2);
 
                 printf("Total time = %lf secs\n", t_sum);
                 printf("Time for 1st query = %lf secs\n", t_first);
@@ -160,6 +194,9 @@ int main(int argc, char *argv[])
 	free(xdata);
 	free(query_mem);
 	free(y);
+
+        free(query_buf);
+        free(rcounts);
 
         MPI_Finalize(); // destroy/finalize the MPI environment
 

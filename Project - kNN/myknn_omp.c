@@ -65,15 +65,6 @@ int main(int argc, char *argv[])
 
 	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
 
-	for (int i = QUERYELEMS-19; i < QUERYELEMS; i++)
-	{
-		printf("point %d: ", i);
-		for (int j = 0; j < PROBDIM; j++)
-			printf("%.4f ", query_mem[i * (PROBDIM + 1) + j]);
-
-		printf("\n");
-	}
-
 #if defined(DEBUG)
 	FILE *fpout = fopen("output.knn_omp.txt","w");
 #endif
