@@ -146,10 +146,10 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	printf("Total time = %lf ms\n", t_end - t_start);
-	printf("Time for 1st query = %lf ms\n", t_first);
-	printf("Time for 2..N queries = %lf ms\n", t_end - t_start - t_first);
-	printf("Average time/query = %lf ms\n", (t_sum - t_first) / (QUERYELEMS - 1));
+	printf("Total time = %lf secs\n", t_end - t_start);
+	printf("Time for 1st query = %lf secs\n", t_first);
+	printf("Time for 2..N queries = %lf secs\n", t_end - t_start - t_first);
+	printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
 
 	free(mem);
 	free(xdata);
