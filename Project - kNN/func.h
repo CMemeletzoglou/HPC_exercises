@@ -6,7 +6,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <mpi.h>
+// #include <mpi.h>
 
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
@@ -34,7 +34,14 @@ void load_binary_data(const char *filename, double *data, const int n)
 	}
 	size_t nelems = fread(data, sizeof(double), n, fp);
 	assert(nelems == n); // check that all elements were actually read
-    	fclose(fp);
+	fclose(fp);
+}
+
+void align_data(double *mem, double **aligned_data, const int mem_row_size, const int ald_row_size, const int num_of_rows)
+{
+	for (int i = 0; i < num_of_rows; i++)
+		for (int j = 0; j < ald_row_size; j++)
+			aligned_data[i][j] = mem[i*mem_row_size + j];
 }
 
 #if defined(MPI)
@@ -203,22 +210,31 @@ double compute_var(double *v, int n, double mean)
 
 double compute_dist(double *v, double *w, int n)
 {
-#if defined (SIMD)	
-	__builtin_assume_aligned(v, 32);
-	__builtin_assume_aligned(w, 32);
-
+#if defined (SIMD)
 	// check for 32-Byte alignment
-	assert( (((size_t)v & 0x1F) == 0) && (((size_t)w & 0x1F) == 0) );	
+	// How are we even sure they are aligned?
+	// v is a pointer to a query. Each query is 17 bytes long (16 dimensions and 1 surrogate)
+	// and they are all stored in a single array.
+	// printf("v = %p | w = %p\n", (size_t)v, (size_t)w);
+	// assert( (((size_t)v & 0x1F) == 0) && (((size_t)w & 0x1F) == 0) );
 
-	__attribute__((aligned(16))) double sum_values[2];
+	// Not required, since we are manually doing the vectorization
+	// __builtin_assume_aligned(v, 32);
+	// __builtin_assume_aligned(w, 32);
+
+
+	// _mm_store_pd(double* mem_addr, __m128d a)
+	// mem_addr requires to be aligned on a 16-byte boundary or a general-protection exception may be generated.
+	// __attribute__((aligned(16))) double sum_values[2];
+	double sum_values;
 
 	int ndiv4 = n / 4;
 	__m256d _sum_v = _mm256_setzero_pd();
 	__m256d _v, _w, _diff;
 	for (int i = 0; i < ndiv4; i++)
 	{
-		_v = _mm256_load_pd(v + i * 4);
-                _w = _mm256_load_pd(w + i * 4);
+		_v = _mm256_load_pd(&v[i*4]);
+		_w = _mm256_load_pd(&w[i*4]);
 		_diff = _mm256_sub_pd(_v, _w);
 		_diff = _mm256_mul_pd(_diff, _diff); // diff squared
 		_sum_v = _mm256_add_pd(_sum_v, _diff); // add to sum vector reg
@@ -226,17 +242,20 @@ double compute_dist(double *v, double *w, int n)
 
 	// reduce the vector's 4 elements into one, using two SSE horizontal additions
 	__m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
-        _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
-	_mm_store_pd(sum_values, _total_sum);
+	_total_sum = _mm_hadd_pd(_total_sum, _total_sum);
+	// _mm_store_pd(sum_values, _total_sum);
+	_mm_storeh_pd(&(sum_values), _total_sum);
 
 	// handle the remaining entries
 	double sum = 0.0f;
 	for (int i = ndiv4 * 4; i < n; i++)
 		sum += pow(v[i] - w[i], 2);
 
-        sum_values[1] = sum;
+	// sum_values[1] = sum;
+	sum_values += sum;
 
-        return sqrt(sum_values[0] + sum_values[1]);
+	// return sqrt(sum_values[0] + sum_values[1]);
+	return sqrt(sum_values);
 #else
 	int i;
 	double s = 0.0;
@@ -378,13 +397,14 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 	// plain mean (other possible options: inverse distance weight, closest value inheritance)
 
 	// assume 32-byte alignment of ydata vector
-	__builtin_assume_aligned(ydata, 32);
+	// __builtin_assume_aligned(ydata, 32);
 
-	// check for 16-Byte alignment
-	assert( (((size_t)ydata & 0x1F) == 0) );
+	// check for 32-Byte alignment
+	// assert( (((size_t)ydata & 0x1F) == 0) );
 
 	// helper 16-byte aligned array to store the final two sum values
-	__attribute__((aligned(16))) double sum_values[2];
+	// __attribute__((aligned(16))) double sum_values[2];
+	double sum_values;
 
 	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg
 	__m256d _ydata;
@@ -412,17 +432,17 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 	// __m128d _total_sum = _mm_add_pd(_mm256_extractf128_pd(_hsum, 1), _mm256_castpd256_pd128(_hsum));
 
 	__m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
-        _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
-	_mm_store_pd(sum_values, _total_sum);
+	_total_sum = _mm_hadd_pd(_total_sum, _total_sum);
+	_mm_storeh_pd(&(sum_values), _total_sum);
 
 	// handle the remaining entries
 	double sum = 0.0f;
 	for (int i = knn_div4 * 4; i < knn; i++)
 		sum += ydata[i];
 
-	sum_values[1] = sum;
+	sum_values+= sum;
 
-	return (sum_values[0] + sum_values[1]) / knn;
+	return sum_values / knn;
 #else
 	int i;
 	double sum_v = 0.0;

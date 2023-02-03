@@ -10,7 +10,7 @@ CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE)
 CFLAGS += -DSURROGATES -Wall
 LDFLAGS += -lm 
 
-all: gendata myknn myknn_omp myknn_mpi
+all: gendata myknn myknn_omp myknn_omp2 myknn_mpi
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -27,14 +27,22 @@ myknn.o: myknn.c
 myknn_simd: myknn_simd.o
 	gcc -o myknn_simd myknn_simd.o $(LDFLAGS)
 
-myknn_simd.o: myknn_simd.c
-	gcc -DSIMD $(CFLAGS) -ggdb -mavx2 -march=native -c myknn_simd.c
+myknn_simd.o: myknn.c
+	gcc -DSIMD $(CFLAGS) -ggdb -mavx2 -march=native -c -o myknn_simd.o myknn.c
 
 myknn_omp: myknn_omp.o
 	gcc -o myknn_omp myknn_omp.o $(LDFLAGS) -fopenmp
 
 myknn_omp.o: myknn_omp.c
 	gcc $(CFLAGS) -ggdb -fopenmp -c myknn_omp.c
+
+# TEMP
+myknn_omp2: myknn_omp2.o
+	gcc -o myknn_omp2 myknn_omp2.o $(LDFLAGS) -fopenmp
+
+myknn_omp2.o: myknn_omp2.c
+	gcc $(CFLAGS) -ggdb -fopenmp -c myknn_omp2.c
+# TEMP - END
 
 myknn_mpi: myknn_mpi.o
 	mpicc -o myknn_mpi myknn_mpi.o $(LDFLAGS)
@@ -43,4 +51,4 @@ myknn_mpi.o: myknn_mpi.c
 	mpicc $(CFLAGS) -DMPI -c myknn_mpi.c
 
 clean:
-	rm -f myknn *.o gendata myknn_omp myknn_simd myknn_mpi
+	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_omp2 myknn_mpi
