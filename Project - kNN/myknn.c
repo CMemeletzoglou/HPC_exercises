@@ -59,20 +59,22 @@ int main(int argc, char *argv[])
 	FILE *fpout = fopen("output.knn.txt","w");
 #endif
 
-	// Create handler arrays that will separate xdata and surrogate
-	// since we are never going to be using both to perform a computation
-	// We either going to use the xdata of two points (ex. when calculating distance from one another)
-	// or use ydata (surrogates) (ex. when predicting the value of a query point)
+	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
+	 * and the corresponding surrogate values, since we never need both
+	 * in order to perform a computation.
+	 * We either going to use the xdata of two points (ex. when calculating distance from one another)
+	 * or use ydata (surrogates) (ex. when predicting the value of a query point)
+	 */
 	xdata = (double **)malloc(TRAINELEMS * sizeof(double *));
 	double **query_xdata = (double **)malloc(QUERYELEMS * sizeof(double *));
 
 #if defined(SIMD)
 	int posix_res;
-	// Allocate new memory for the handler arrays, so it is aligned and copy the data there
+	// Allocate new memory for the handler arrays, so that it is aligned and copy the data there
 	// Align each xdata[i] to a 32 byte boundary so you may later use SIMD
 	for (int i = 0; i < TRAINELEMS; i++)
 	{
-		posix_res = posix_memalign((void **)(&(xdata[i])), 32, PROBDIM*sizeof(double));
+		posix_res = posix_memalign((void **)(&(xdata[i])), 32, PROBDIM * sizeof(double));
 		assert(posix_res == 0);
 	}
 	copy_to_aligned(mem, xdata, (PROBDIM+1), PROBDIM, TRAINELEMS);
@@ -80,7 +82,7 @@ int main(int argc, char *argv[])
 	// Align each query_xdata[i] to a 32 byte boundary so you may later use SIMD
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
-		posix_res = posix_memalign((void **)(&(query_xdata[i])), 32, PROBDIM*sizeof(double));
+		posix_res = posix_memalign((void **)(&(query_xdata[i])), 32, PROBDIM * sizeof(double));
 		assert(posix_res == 0);
 	}
 	copy_to_aligned(query_mem, query_xdata, (PROBDIM+1), PROBDIM, QUERYELEMS);
