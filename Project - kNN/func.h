@@ -219,7 +219,7 @@ double compute_dist(double *v, double *w, int n)
 	// check for 32-Byte alignment
 	assert( (((size_t)v & 0x1F) == 0) && (((size_t)w & 0x1F) == 0) );
 #endif
-	double sum_values;
+	double sum_value;
 
 	int ndiv4 = n / 4;
 	__m256d _sum_v = _mm256_setzero_pd();
@@ -233,24 +233,34 @@ double compute_dist(double *v, double *w, int n)
 		_sum_v = _mm256_add_pd(_sum_v, _diff); // add to sum vector reg
 	}
 
-	// reduce the vector's 4 elements into one, using two SSE horizontal additions
-	// __m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
-	// _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
-	// _mm_store_pd(sum_values, _total_sum);
-	// _mm_storeh_pd(&(sum_values), _total_sum);
-
+	/* Horizontal sum the contents of the _sum_v vector register. This yields :
+	 * | _sum_v[63:0]+_sum_v[127:64] | _sum_v[63:0]+_sum_v[127:64] | _sum_v[191:128]+_sum_v[255:192] | _sum_v[191:128]+_sum_v[255:192] |.
+	 * We now need to add half of the low-order 128 bits with half of the high-order 128 bits.
+	 * We use _mm256_extractf128_pd(_hsum, 1) to extract the 128 high-order bits, and _mm256_castpd256_pd128(_hsum) to cast
+	 * the 256-bit vector register into a 128-bit one (by truncating its 128 high-order bits).
+	 * We then add the two resulting 128 bit vector registers, to produce a vector which contains the final sum values.
+	 * 
+	 * _mm256_extractf128_pd(_hsum, 1) : | _sum_v[191:128]+_sum_v[255:192] | _sum_v[191:128]+_sum_v[255:192] |
+	 * 							
+	 * 								       + (using _mm_add_pd)
+	 * 
+	 * _mm256_castpd256_pd128(_hsum) :   | _sum_v[63:0]+_sum_v[127:64]     | _sum_v[63:0]+_sum_v[127:64]     |
+	 *
+	 * _total_sum = 		     | final_sum 	  	       | final_sum			 |
+	 *
+	 */
 	__m256d _hsum = _mm256_hadd_pd(_sum_v, _sum_v);
 	__m128d _total_sum = _mm_add_pd(_mm256_extractf128_pd(_hsum, 1), _mm256_castpd256_pd128(_hsum));
-	_mm_storeh_pd(&(sum_values), _total_sum);
+	_mm_storeh_pd(&(sum_value), _total_sum);
 
 	// handle the remaining entries
 	double sum = 0.0f;
 	for (int i = ndiv4 * 4; i < n; i++)
 		sum += pow(v[i] - w[i], 2);
 
-	sum_values += sum;
+	sum_value += sum;
 
-	return sqrt(sum_values);
+	return sqrt(sum_value);
 #else
 	int i;
 	double s = 0.0;
@@ -351,6 +361,7 @@ void compute_knn_brute_force(double **xdata, double *q, int npat, int lpat, int 
 		nn_d[i] = 1e99 - i; // TODO: is "-i" needed (???), prob not
 	}
 
+	// find K neighbors
 	max_d = compute_max_pos(nn_d, knn, &max_i);
 	for (i = 0; i < npat; i++)
 	{
@@ -399,7 +410,7 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 	assert( (((size_t)ydata & 0x1F) == 0) );
 #endif
 
-	double sum_values;
+	double sum_value;
 
 	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg
 	__m256d _ydata;
@@ -413,32 +424,23 @@ double predict_value(int dim, int knn, double *xdata, double *ydata, double *poi
 	/* After the for 4-stride for loop finished, the _sum_v vector register contains:
 	 * 			s0 || s1 || s2 || s3
 	 * These values need to be added together (reduced) to produce the final vector sum value.
-	 * Use _mm256_extractf128_pd(_hsum, 0) to extract the lower 128-bit part s0 || s1 and
-	 * _mm256_extractf128_pd(_hsum, 1) to extract the upper 128-bit part s2 || s3.
-	 * Then use two SSE horizontal additions to execute the final reduction
-	 */
+	 * We use _mm256_extractf128_pd(_hsum, 1) to extract the higher 128-bit part s2 || s3 and
+	 * _mm256_castpd256_pd128(_hsum) to cast the 256-bit _hsum vector to 128 bits.
+	 */ 
 
 	// sum the 4 elements of the sum vector to get the final sum value
-
-	// ***************************************
-	// 	AVX instructions-only way
-	// ***************************************
 	__m256d _hsum = _mm256_hadd_pd(_sum_v, _sum_v);
 	__m128d _total_sum = _mm_add_pd(_mm256_extractf128_pd(_hsum, 1), _mm256_castpd256_pd128(_hsum));
-	_mm_storeh_pd(&(sum_values), _total_sum);
-
-	// __m128d _total_sum = _mm_hadd_pd(_mm256_extractf128_pd(_sum_v, 0), _mm256_extractf128_pd(_sum_v, 1));
-	// _total_sum = _mm_hadd_pd(_total_sum, _total_sum);
-	// _mm_storeh_pd(&(sum_values), _total_sum);
+	_mm_storeh_pd(&(sum_value), _total_sum);
 
 	// handle the remaining entries
 	double sum = 0.0f;
 	for (int i = knn_div4 * 4; i < knn; i++)
 		sum += ydata[i];
 
-	sum_values+= sum;
+	sum_value+= sum;
 
-	return sum_values / knn;
+	return sum_value / knn;
 #else
 	int i;
 	double sum_v = 0.0;
