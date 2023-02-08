@@ -10,14 +10,15 @@
 
 #define DEBUG 1
 
-// My L1d = 192 KiB, and I want cache the maximum amount of training points
-// each of size PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
-// Thus I may preserve in L1d cache 192,000 / 128 = 1,500 points simultaneously.
+// My L1d = 192 KiB, and I want to cache the maximum amount of training points.
+// Each training point has a size of: PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
+// Thus, in L1d I may preserve in L1d cache 192,000 / 128 = 1,500 training points simultaneously.
 // I also need to be able to store in cache the query point aswell (!!)
 // and have a block size that will evenly devide TRAINELEMS.
 // The easy solution is to get the max power of 2 that is less that 1,500,
 // since TRAINELEMS is also a power of 2.
-#define TRAIN_BLOCK_SIZE 1024
+#define TRAIN_BLOCK_SIZE 4096
+// #define TRAIN_BLOCK_SIZE 128
 
 static double **xdata;
 static double ydata[TRAINELEMS];
@@ -34,7 +35,7 @@ double find_knn_value(query_t *q, int knn)
 
 	for (int i = 0; i < knn; i++) 
 		for (int j = 0; j < PROBDIM; j++)
-			xd[i*PROBDIM + j] = xdata[q->nn_idx[i]][j];
+			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
 
 	return predict_value(PROBDIM, knn, xd, fd);
 }
@@ -49,6 +50,7 @@ int main(int argc, char *argv[])
 
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
+
 	double *mem = (double *)malloc(TRAINELEMS * (PROBDIM + 1) * sizeof(double));
 	double *query_mem = (double *)malloc(QUERYELEMS * (PROBDIM + 1) * sizeof(double));
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));
@@ -82,19 +84,25 @@ int main(int argc, char *argv[])
 	
 	assert(TRAINELEMS % TRAIN_BLOCK_SIZE == 0);
 
+	// initialize the query element surrogate values array
+	for (int i = 0; i < QUERYELEMS; i++)
+	{	
+#if defined(SURROGATES)
+		y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
+#else
+		y[i] = 0.0;
+#endif
+	}
+
+	/* For each training elements block, we calculate each query point's k neighbors,
+	 * using the training elements, that belong to the current training element block.
+	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
+	 */
 	t0 = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += TRAIN_BLOCK_SIZE)
-	{
 		for (int i = 0; i < QUERYELEMS; i++)
-		{	/* requests */
-#if defined(SURROGATES)
-			y[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
-#else
-			y[i] = 0.0;
-#endif
 			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, TRAIN_BLOCK_SIZE);
-		}
-	}
+
 	t1 = gettime();
 	t_sum = t1 - t0;
 

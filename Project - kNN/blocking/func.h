@@ -13,7 +13,7 @@
 // in the preceding blocks.
 typedef struct query_s
 {
-	double *x; // Query's coordinates + surrogate
+	double *x; // Query's coordinates + surrogate value 
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
 	double nn_d[NNBS]; // The distance between the query point and each one of the k nearest neighbors
 } query_t;
@@ -50,12 +50,12 @@ void load_binary_data(const char *filename, double *data, query_t *query_status,
 	if (query_status != NULL)
 	{
 		for (int i = 0; i < QUERYELEMS; i++)
-		for (int j = 0; j < NNBS; j++)
-		{
-			query_status[i].x = &data[i*(PROBDIM+1)];
-			query_status[i].nn_idx[j] = -1;
-			query_status[i].nn_d[j] = 1e99 - j;
-		}
+			for (int j = 0; j < NNBS; j++)
+			{
+				query_status[i].x = &data[i * (PROBDIM + 1)];
+				query_status[i].nn_idx[j] = -1;
+				query_status[i].nn_d[j] = 1e99 - j;
+			}
 	}
 }
 
@@ -283,8 +283,9 @@ void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int tra
 	int i, max_i;
 	double max_d, new_d;
 
+	// find K neighbors
 	max_d = compute_max_pos(q->nn_d, k, &max_i);
-	for (i = train_data_offset; i < train_data_offset + num_train_data; i++)
+	for (i = train_data_offset; i < train_data_offset + num_train_data; i++) // i runs inside each training block's boundaries
 	{
 		new_d = compute_dist(q->x, xdata[i], dim); // euclidean
 		if (new_d < max_d) // add point to the list of knns, replace element max_i
