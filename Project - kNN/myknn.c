@@ -8,6 +8,7 @@
 #define PROBDIM 2
 #endif
 
+// TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double ydata[TRAINELEMS];
 
@@ -18,8 +19,12 @@ double find_knn_value(double *p, int n, int knn)
 
 	compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force / linear search
 
-	double xd[knn * PROBDIM];     // the knn neighboring points/vectors of size PROBDIM
-	__attribute__((aligned(32))) double fd[knn];	      	      // function values for the knn neighbors
+	double xd[knn * PROBDIM];     						 // the knn neighboring points/vectors of size PROBDIM
+#if defined(SIMD)
+	__attribute__((aligned(32))) double fd[knn];	      	     		 // function values for the knn neighbors
+#else 
+	double fd[knn];
+#endif	
 
 	for (int i = 0; i < knn; i++)
 		fd[i] = ydata[nn_x[i]];
@@ -70,7 +75,7 @@ int main(int argc, char *argv[])
 		posix_res = posix_memalign((void **)(&(xdata[i])), 32, PROBDIM*sizeof(double));
 		assert(posix_res == 0);
 	}
-	align_data(mem, xdata, (PROBDIM+1), PROBDIM, TRAINELEMS);
+	copy_to_aligned(mem, xdata, (PROBDIM+1), PROBDIM, TRAINELEMS);
 
 	// Align each query_xdata[i] to a 32 byte boundary so you may later use SIMD
 	for (int i = 0; i < QUERYELEMS; i++)
@@ -78,7 +83,7 @@ int main(int argc, char *argv[])
 		posix_res = posix_memalign((void **)(&(query_xdata[i])), 32, PROBDIM*sizeof(double));
 		assert(posix_res == 0);
 	}
-	align_data(query_mem, query_xdata, (PROBDIM+1), PROBDIM, QUERYELEMS);
+	copy_to_aligned(query_mem, query_xdata, (PROBDIM+1), PROBDIM, QUERYELEMS);
 #else
 	// Assign to the handler arrays, pointers to the already allocated mem
 	for (int i = 0; i < TRAINELEMS; i++)
@@ -89,7 +94,6 @@ int main(int argc, char *argv[])
 #endif
 
 	/* Configure and Initialize the ydata handler arrays */
-	// TODO: (keep the code uniform) Either make query_ydata a global static array or dynamically allocate ydata array here aswell
 	double *query_ydata = malloc(QUERYELEMS * sizeof(double));
 	
 	for (int i = 0; i < TRAINELEMS; i++)
@@ -174,6 +178,7 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < QUERYELEMS; i++)
 		free(query_xdata[i]);
 #endif
+	free(query_xdata);
 	free(query_ydata);
 	free(query_mem);
 
