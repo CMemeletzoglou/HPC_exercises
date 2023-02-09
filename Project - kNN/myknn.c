@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
 	get_L1d_size(&L1d_size); // get L1d cache size
 	// calculate the appropriate train block size as the previous power of 2
 	if(L1d_size > 0)
-		train_block_size = pow(2, floor(log2((L1d_size * 1000) / 128)));
+		train_block_size = pow(2, floor(log2((L1d_size * 1000) / (PROBDIM * sizeof(double)))));
 
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
