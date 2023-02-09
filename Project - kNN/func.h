@@ -6,7 +6,20 @@
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
-// #include <mpi.h>
+#include <mpi.h>
+
+// struct that will preserve the k nearest neighbors for each query.
+// Will be used in order to load training data in a blocking fashion,
+// iterating over all query points. Thus for each query point we will
+// need to preserve the k nearest neighbors that have been found so far
+// in the preceding blocks.
+typedef struct query_s
+{
+	// __attribute__((aligned(32))) double x[PROBDIM]; // Query's coordinate
+	double *x;
+	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
+	double nn_d[NNBS]; // The distance between the query point and each one of the k nearest neighbors
+} query_t;
 
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
@@ -23,7 +36,7 @@ void store_binary_data(char *filename, double *data, int n)
 	fclose(fp);
 }
 
-void load_binary_data(const char *filename, double *data, const int n)
+void load_binary_data(const char *filename, double *data, query_t *queries, const int n)
 {
 	FILE *fp;
 	fp = fopen(filename, "rb");
@@ -35,6 +48,26 @@ void load_binary_data(const char *filename, double *data, const int n)
 	size_t nelems = fread(data, sizeof(double), n, fp);
 	assert(nelems == n); // check that all elements were actually read
 	fclose(fp);
+
+	// If queries are loaded, initialize the queries structs
+	if (queries != NULL)
+	{
+		size_t posix_res;
+		for (int i = 0; i < QUERYELEMS; i++)
+		{
+			posix_res = posix_memalign((void **)(&(queries[i].x)), 32, PROBDIM * sizeof(double));
+			assert(posix_res == 0);
+
+			for (int k = 0; k < PROBDIM; k++)
+				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
+
+			for (int j = 0; j < NNBS; j++)
+				queries[i].nn_idx[j] = -1;
+
+			for (int j = 0; j < NNBS; j++)
+				queries[i].nn_d[j] = 1e99 - j;
+		}
+	}
 }
 
 void copy_to_aligned(double *mem, double **aligned_data, const int mem_row_size, const int aligned_data_row_size, const int num_of_rows)
@@ -87,6 +120,20 @@ double read_nextnum(FILE *fp)
 		exit(1);
 	}
 	return val;
+}
+
+// helper function to get L1d size in order to set the appropriate training block size
+void get_L1d_size(int *L1d_size)
+{
+#if defined(__linux__)
+	FILE *fptr = fopen("/sys/devices/system/cpu/cpu0/cache/index0/size", "r");
+	if (fptr)
+		fscanf(fptr, "%d", L1d_size);
+
+	fclose(fptr);
+#else
+	*L1d_size = 0;
+#endif
 }
 
 /* Timer */
@@ -211,10 +258,8 @@ double compute_var(double *v, int n, double mean)
 double compute_dist(double *v, double *w, int n)
 {
 #if defined (SIMD)
-
 	__builtin_assume_aligned(v, 32);
 	__builtin_assume_aligned(w, 32);
-
 #if defined(DEBUG)
 	// check for 32-Byte alignment
 	assert( (((size_t)v & 0x1F) == 0) && (((size_t)w & 0x1F) == 0) );
@@ -349,67 +394,60 @@ double compute_distance(double *pat1, double *pat2, int lpat, int norm)
 
 // npat -> TRAINELEMS
 // lpat -> PROBDIM
-void compute_knn_brute_force(double **xdata, double *q, int npat, int lpat, int knn, int *nn_x, double *nn_d)
+// void compute_knn_brute_force(double **xdata, query_t *q, int npat, int lpat, int knn, int *nn_x, double *nn_d)
+void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int train_data_offset, int num_train_data)
 {
 	int i, max_i;
 	double max_d, new_d;
 
-	/* initialize pairs of index and distance */
-	for (i = 0; i < knn; i++)
-	{
-		nn_x[i] = -1;
-		nn_d[i] = 1e99 - i; // TODO: is "-i" needed (???), prob not
-	}
-
 	// find K neighbors
-	max_d = compute_max_pos(nn_d, knn, &max_i);
-	for (i = 0; i < npat; i++)
+	max_d = compute_max_pos(q->nn_d, k, &max_i);
+	for (i = train_data_offset; i < train_data_offset + num_train_data; i++) // i runs inside each training block's boundaries
 	{
-		new_d = compute_dist(q, xdata[i], lpat);	// euclidean
+		new_d = compute_dist(q->x, xdata[i], dim); // euclidean		
 		if (new_d < max_d) // add point to the list of knns, replace element max_i
 		{	
-			nn_x[max_i] = i;
-			nn_d[max_i] = new_d;
+			q->nn_idx[max_i] = i;
+			q->nn_d[max_i] = new_d;
 		}
-		max_d = compute_max_pos(nn_d, knn, &max_i);
+		max_d = compute_max_pos(q->nn_d, k, &max_i);
 	}
 
 	/* sort the knn list */ // bubble sort
-	int temp_x, j;
-	double temp_d;
-	for (i = (knn - 1); i > 0; i--)
-	{
-		for (j = 1; j <= i; j++)
-		{
-			if (nn_d[j-1] > nn_d[j])
-			{
-				temp_d = nn_d[j-1];
-				nn_d[j-1] = nn_d[j];
-				nn_d[j] = temp_d;
+	// int temp_x, j;
+	// double temp_d;
+	// for (i = (knn - 1); i > 0; i--)
+	// {
+	// 	for (j = 1; j <= i; j++)
+	// 	{
+	// 		if (nn_d[j-1] > nn_d[j])
+	// 		{
+	// 			temp_d = nn_d[j-1];
+	// 			nn_d[j-1] = nn_d[j];
+	// 			nn_d[j] = temp_d;
 				
-				temp_x = nn_x[j-1];
-				nn_x[j-1] = nn_x[j];
-				nn_x[j] = temp_x;
-			}
-		}
-	}
+	// 			temp_x = nn_x[j-1];
+	// 			nn_x[j-1] = nn_x[j];
+	// 			nn_x[j] = temp_x;
+	// 		}
+	// 	}
+	// }
 }
 
 
 /* compute an approximation based on the values of the neighbors */
-double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
+// double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
+double predict_value(int dim, int knn, double *xdata, double *ydata)
 {
 #if defined (SIMD)
 	// plain mean (other possible options: inverse distance weight, closest value inheritance)
 
 	// assume 32-byte alignment of ydata vector
 	__builtin_assume_aligned(ydata, 32);
-
 #if defined(DEBUG)
 	// check for 32-Byte alignment
 	assert( (((size_t)ydata & 0x1F) == 0) );
 #endif
-
 	double sum_value;
 
 	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg

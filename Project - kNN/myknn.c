@@ -8,32 +8,38 @@
 #define PROBDIM 2
 #endif
 
+// My L1d = 192 KiB, and I want to cache the maximum amount of training points.
+// Each training point has a size of: PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
+// Thus, in L1d I may preserve in L1d cache 192,000 / 128 = 1,500 training points simultaneously.
+// I also need to be able to store in cache the query point aswell (!!)
+// and have a block size that will evenly devide TRAINELEMS.
+// The easy solution is to get the max power of 2 that is less that 1,500,
+// since TRAINELEMS is also a power of 2.
+// #define train_block_size 128
+
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double ydata[TRAINELEMS];
 
-double find_knn_value(double *p, int n, int knn)
+// double find_knn_value(double *p, int n, int knn)
+double find_knn_value(query_t *q, int knn)
 {
-	int nn_x[knn];
-	double nn_d[knn];
+	double xd[knn * PROBDIM];    // the knn neighboring points/vectors of size PROBDIM
 
-	compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force / linear search
-
-	double xd[knn * PROBDIM];     						 // the knn neighboring points/vectors of size PROBDIM
 #if defined(SIMD)
-	__attribute__((aligned(32))) double fd[knn];	      	     		 // function values for the knn neighbors
+	__attribute__((aligned(32))) double fd[knn];	// function values for the knn neighbors
 #else 
 	double fd[knn];
 #endif	
 
 	for (int i = 0; i < knn; i++)
-		fd[i] = ydata[nn_x[i]];
+		fd[i] = ydata[q->nn_idx[i]];
 
 	for (int i = 0; i < knn; i++) 
 		for (int j = 0; j < PROBDIM; j++)
-			xd[i * PROBDIM + j] = xdata[nn_x[i]][j];
+			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
 
-	return predict_value(PROBDIM, knn, xd, fd, p, nn_d);
+	return predict_value(PROBDIM, knn, xd, fd);
 }
 
 int main(int argc, char *argv[])
@@ -45,14 +51,21 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+	int L1d_size, train_block_size = 1;
+	get_L1d_size(&L1d_size); // get L1d cache size
+	// calculate the appropriate train block size as the previous power of 2
+	if(L1d_size > 0)
+		train_block_size = pow(2, floor(log2((L1d_size * 1000) / 128)));
+
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
 
 	double *mem = (double *)malloc(TRAINELEMS * (PROBDIM + 1) * sizeof(double));
 	double *query_mem = (double *)malloc(QUERYELEMS * (PROBDIM + 1) * sizeof(double));	
-	
-	load_binary_data(trainfile, mem, TRAINELEMS*(PROBDIM+1));
-	load_binary_data(queryfile, query_mem, QUERYELEMS * (PROBDIM + 1));
+	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));
+
+	load_binary_data(trainfile, mem, NULL, TRAINELEMS*(PROBDIM+1));
+	load_binary_data(queryfile, query_mem, queries, QUERYELEMS * (PROBDIM + 1));
 
 #if defined(DEBUG)
 	/* Create/Open an output file */
@@ -66,7 +79,6 @@ int main(int argc, char *argv[])
 	 * or use ydata (surrogates) (ex. when predicting the value of a query point)
 	 */
 	xdata = (double **)malloc(TRAINELEMS * sizeof(double *));
-	double **query_xdata = (double **)malloc(QUERYELEMS * sizeof(double *));
 
 #if defined(SIMD)
 	int posix_res;
@@ -78,21 +90,10 @@ int main(int argc, char *argv[])
 		assert(posix_res == 0);
 	}
 	copy_to_aligned(mem, xdata, (PROBDIM+1), PROBDIM, TRAINELEMS);
-
-	// Align each query_xdata[i] to a 32 byte boundary so you may later use SIMD
-	for (int i = 0; i < QUERYELEMS; i++)
-	{
-		posix_res = posix_memalign((void **)(&(query_xdata[i])), 32, PROBDIM * sizeof(double));
-		assert(posix_res == 0);
-	}
-	copy_to_aligned(query_mem, query_xdata, (PROBDIM+1), PROBDIM, QUERYELEMS);
 #else
 	// Assign to the handler arrays, pointers to the already allocated mem
 	for (int i = 0; i < TRAINELEMS; i++)
 		xdata[i] = &mem[i*(PROBDIM + 1)];
-
-	for (int i = 0; i < QUERYELEMS; i++)
-		query_xdata[i] = &query_mem[i*(PROBDIM + 1)];
 #endif
 
 	/* Configure and Initialize the ydata handler arrays */
@@ -116,36 +117,41 @@ int main(int argc, char *argv[])
 #endif
 	}
 
+	assert(TRAINELEMS % train_block_size == 0);
+
 	/* COMPUTATION PART */
 
 	double t0, t1, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
 	double err, err_sum = 0.0;
-	
+
+	/* For each training elements block, we calculate each query point's k neighbors,
+	 * using the training elements, that belong to the current training element block.
+	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
+	 */
+	t0 = gettime();
+	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
+		for (int i = 0; i < QUERYELEMS; i++)
+			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
+
+	t1 = gettime();
+	t_sum = t1 - t0;
+
 	for (int i = 0; i < QUERYELEMS; i++)
-	{	/* requests */
+	{
 		t0 = gettime();
-		double yp = find_knn_value(query_xdata[i], PROBDIM, NNBS);
+		double yp = find_knn_value(&(queries[i]), NNBS);
 		t1 = gettime();
-		t_sum += (t1-t0);
-		if (i == 0)
-			t_first = (t1-t0);
-
+		t_sum += t1 - t0;
+		
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
-
-#if defined(DEBUG)
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-#endif
-
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-
-#if defined(DEBUG)
-		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
+#if DEBUG
+		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
 #endif
 		err_sum += err;
 	}
-
+	
 	/* CALCULATE AND DISPLAY RESULTS */
 
 	double mse = sse / QUERYELEMS;
@@ -176,13 +182,9 @@ int main(int argc, char *argv[])
 #endif
 	free(xdata);
 	free(mem);
-#if defined(SIMD)
-	for (int i = 0; i < QUERYELEMS; i++)
-		free(query_xdata[i]);
-#endif
-	free(query_xdata);
 	free(query_ydata);
 	free(query_mem);
+	free(queries);
 
 	return 0;
 }
