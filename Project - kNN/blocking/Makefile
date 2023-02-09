@@ -2,7 +2,6 @@ DIM ?= 16
 KNN ?= 32
 TRA ?= 1048576
 QUE ?= 1024
-# QUE ?= 32
 
 LOW ?=  0
 HIGH ?= 2

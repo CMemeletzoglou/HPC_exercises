@@ -13,7 +13,7 @@
 // in the preceding blocks.
 typedef struct query_s
 {
-	double *x; // Query's coordinates + surrogate value 
+	double x[PROBDIM]; // Query's coordinate
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
 	double nn_d[NNBS]; // The distance between the query point and each one of the k nearest neighbors
 } query_t;
@@ -52,7 +52,9 @@ void load_binary_data(const char *filename, double *data, query_t *query_status,
 		for (int i = 0; i < QUERYELEMS; i++)
 			for (int j = 0; j < NNBS; j++)
 			{
-				query_status[i].x = &data[i * (PROBDIM + 1)];
+				for (int k = 0; k < PROBDIM; k++)
+					query_status[i].x[k] = data[i * (PROBDIM + 1) + k];
+
 				query_status[i].nn_idx[j] = -1;
 				query_status[i].nn_d[j] = 1e99 - j;
 			}
