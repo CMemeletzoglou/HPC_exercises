@@ -8,8 +8,6 @@
 #define PROBDIM 2
 #endif
 
-#define DEBUG 1
-
 // My L1d = 192 KiB, and I want to cache the maximum amount of training points.
 // Each training point has a size of: PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
 // Thus, in L1d I may preserve in L1d cache 192,000 / 128 = 1,500 training points simultaneously.
@@ -17,8 +15,7 @@
 // and have a block size that will evenly devide TRAINELEMS.
 // The easy solution is to get the max power of 2 that is less that 1,500,
 // since TRAINELEMS is also a power of 2.
-#define TRAIN_BLOCK_SIZE 4096
-// #define TRAIN_BLOCK_SIZE 128
+// #define train_block_size 128
 
 static double **xdata;
 static double ydata[TRAINELEMS];
@@ -47,6 +44,12 @@ int main(int argc, char *argv[])
 		printf("usage: %s <trainfile> <queryfile>\n", argv[0]);
 		exit(1);
 	}
+
+	int L1d_size, train_block_size = 1;
+	get_L1d_size(&L1d_size); // get L1d cache size
+	// calculate the appropriate train block size as the previous power of 2
+	if(L1d_size > 0)
+		train_block_size = pow(2, floor(log2((L1d_size * 1000) / 128)));
 
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
@@ -82,7 +85,7 @@ int main(int argc, char *argv[])
 	double sse = 0.0;
 	double err, err_sum = 0.0;
 	
-	assert(TRAINELEMS % TRAIN_BLOCK_SIZE == 0);
+	assert(TRAINELEMS % train_block_size == 0);
 
 	// initialize the query element surrogate values array
 	for (int i = 0; i < QUERYELEMS; i++)
@@ -99,9 +102,9 @@ int main(int argc, char *argv[])
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 */
 	t0 = gettime();
-	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += TRAIN_BLOCK_SIZE)
+	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
 		for (int i = 0; i < QUERYELEMS; i++)
-			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, TRAIN_BLOCK_SIZE);
+			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
 
 	t1 = gettime();
 	t_sum = t1 - t0;
@@ -134,6 +137,10 @@ int main(int argc, char *argv[])
 
 	printf("Total time = %lf sec\n", t_sum);
 	printf("Average time/query = %lf sec\n", t_sum / QUERYELEMS);
+
+#if DEBUG
+	fclose(fpout);
+#endif
 
 	free(mem);
 	free(xdata);

@@ -71,6 +71,20 @@ double read_nextnum(FILE *fp)
 	return val;
 }
 
+// helper function to get L1d size in order to set the appropriate training block size
+void get_L1d_size(int *L1d_size)
+{
+#if defined(__linux__)
+	FILE *fptr = fopen("/sys/devices/system/cpu/cpu0/cache/index0/size", "r");
+	if (fptr)
+		fscanf(fptr, "%d", L1d_size);
+
+	fclose(fptr);
+#else
+	*L1d_size = 0;
+#endif
+}
+
 /* Timer */
 double gettime()
 {
