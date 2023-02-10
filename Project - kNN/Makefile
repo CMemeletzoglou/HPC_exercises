@@ -6,7 +6,7 @@ QUE ?= 1024
 LOW ?=  0
 HIGH ?= 2
 
-CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -O3
+CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -O3 -march=native
 CFLAGS += -DSURROGATES -Wall
 LDFLAGS += -lm 
 
@@ -28,7 +28,7 @@ myknn_simd: myknn_simd.o
 	gcc -o myknn_simd myknn_simd.o $(LDFLAGS)
 
 myknn_simd.o: myknn.c
-	gcc -DSIMD $(CFLAGS) -ggdb -mavx2 -march=native -c -o myknn_simd.o myknn.c
+	gcc -DSIMD $(CFLAGS) -ggdb -c -o myknn_simd.o myknn.c
 
 myknn_omp: myknn_omp.o
 	gcc -o myknn_omp myknn_omp.o $(LDFLAGS) -fopenmp
@@ -41,7 +41,7 @@ myknn_omp2: myknn_omp2.o
 	gcc -o myknn_omp2 myknn_omp2.o $(LDFLAGS) -fopenmp
 
 myknn_omp2.o: myknn_omp2.c
-	gcc $(CFLAGS) -ggdb -fopenmp -c myknn_omp2.c
+	gcc -DSIMD $(CFLAGS) -ggdb -mavx -fopenmp -c myknn_omp2.c
 # TEMP - END
 
 myknn_mpi: myknn_mpi.o
