@@ -111,12 +111,23 @@ int main(int argc, char *argv[])
 #endif
 	
         /* COMPUTATION PART */
-	double t0, t1, t_start, t_end, t_first = 0.0, t_sum = 0.0;
+        double t0, t1, t_start, t_end, t_first = 0.0, t_sum = 0.0, t_total;
         double sse = 0.0;
         double err_sum = 0.0;
 
 	size_t nthreads;
-        	
+        
+        /* Parallel + Blocking Query Point k-nearest neighbors calculation.
+         * For each block of Training Points of size train_block_size,
+         * find each Query Point's k neighbors using the Training Points of the
+         * current block.
+         * We divide the iterations with each thread block to the available threads,
+         * since the k-neighbor calculation for each Query Point, does not depend
+         * on the k-neighbor calculation of the other Query Points.
+         * 
+         * It was observed that the schedule(dynamic, 1) loop scheduling clause,
+         * gave a speedup of at most ~0.3 secs over the default static one.
+         */
         t_start = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
         {
@@ -126,6 +137,21 @@ int main(int argc, char *argv[])
         
         }
 
+        /* After having found each Query Point's k-nearest neighbors, we proceed
+         * with the calculation of the estimated value for the target function,
+         * for each Query Point.
+         * 
+         * We explicitly manage the chunks of work assigned to each thread, 
+         * using the variables start and end, because if we just use a
+         * parallel for worksharing construct, if the DEBUG mode is enabled,
+         * a race condition would appear on the writing of the output logging file.
+         *
+         * Therefore, we use the variables start and end and the thread-local arrays
+         * yp, err, to gather the debugging info from each thread's computations.
+         * Then the thread-local information, is written on the shared arrays
+         * yp_vals, err_vals, where each thread writes in a different region of the
+         * arrays, defined by the start and end variables.
+         */
         #pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1) 
 	{
 		size_t tid = omp_get_thread_num();
@@ -177,6 +203,8 @@ int main(int argc, char *argv[])
 	}
 	
         t_end = gettime();
+        // total running time (parallel blocking neighbor find + query point function value estimation calculation)
+        t_total = t_end - t_start; 
 
 #if defined(DEBUG)
 	for (int i = 0; i < QUERYELEMS; i++)
@@ -187,7 +215,7 @@ int main(int argc, char *argv[])
 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], err_vals[i]);
 	}
 #endif
-
+        
 	double mse = sse / QUERYELEMS;
 	double ymean = compute_mean(query_ydata, QUERYELEMS);
 	double var = compute_var(query_ydata, QUERYELEMS, ymean);
@@ -198,9 +226,8 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	printf("Total time = %lf secs\n", t_end - t_start);
-	printf("Time for 1..N queries = %lf secs\n", t_end - t_start);
-	printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
+	printf("Total time = %lf secs\n", t_total);
+	printf("Average time/query = %lf secs\n", t_total / QUERYELEMS);
 
 	free(mem);
 	free(query_mem);
