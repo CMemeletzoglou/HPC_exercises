@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
 #endif
 	
         /* COMPUTATION PART */
-        double t0, t1, t_start, t_end, t_first = 0.0, t_sum = 0.0, t_total;
+        double t0, t1, t_start, t_end, t_sum = 0.0, t_total;
         double sse = 0.0;
         double err_sum = 0.0;
 
@@ -124,17 +124,13 @@ int main(int argc, char *argv[])
          * We divide the iterations with each thread block to the available threads,
          * since the k-neighbor calculation for each Query Point, does not depend
          * on the k-neighbor calculation of the other Query Points.
-         * 
-         * It was observed that the schedule(dynamic, 1) loop scheduling clause,
-         * gave a speedup of at most ~0.3 secs over the default static one.
          */
         t_start = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
         {
-                #pragma omp parallel for schedule(dynamic, 1)
+                #pragma omp parallel for
                 for (int i = 0; i < QUERYELEMS; i++)
 			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
-        
         }
 
         /* After having found each Query Point's k-nearest neighbors, we proceed
