@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
 		
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-#if DEBUG
+#if defined(DEBUG)
 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
 #endif
 		err_sum += err;
