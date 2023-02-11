@@ -1,3 +1,5 @@
+#pragma once
+
 #include <emmintrin.h>
 #include <immintrin.h>
 #include <x86intrin.h>
@@ -6,7 +8,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <mpi.h>
 
 // struct that will preserve the k nearest neighbors for each query.
 // Will be used in order to load training data in a blocking fashion,
@@ -76,39 +77,6 @@ void copy_to_aligned(double *mem, double **aligned_data, const int mem_row_size,
 		for (int j = 0; j < aligned_data_row_size; j++)
 			aligned_data[i][j] = mem[i*mem_row_size + j];
 }
-
-#if defined(MPI)
-
-void load_binary_data_mpi(const char *filename, double *data, const int qelems, const int probdim, const int N)
-{
-	int rank, nprocs;
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-
-	// Open the file (collective call)
-	MPI_File f;
-        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &f);
-
-        // Calculate the offset for each rank
-        MPI_Offset base;
-        MPI_File_get_position(f, &base);
-
-	MPI_Offset data_len = N * sizeof(double);
-	MPI_Offset offset = rank * data_len; // rank offset
-
-	int num_elems = N;
-	if (rank == nprocs - 1)
-		num_elems += (qelems % nprocs) * (probdim + 1);
-
-	// Read the data
-        MPI_Status status;
-        MPI_File_read_at_all(f, base + offset, data, num_elems, MPI_DOUBLE, &status); // blocking collective call
-
-        // Close the file
-        MPI_File_close(&f);        
-}
-
-#endif
 
 double read_nextnum(FILE *fp)
 {

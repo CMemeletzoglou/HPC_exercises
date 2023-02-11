@@ -47,9 +47,9 @@ myknn_mpi2: myknn_mpi2.o
 	mpicc -o myknn_mpi2 myknn_mpi2.o $(LDFLAGS)
 
 myknn_mpi2.o: myknn_mpi2.c
-	mpicc $(CFLAGS) -c myknn_mpi.c
+	mpicc $(CFLAGS) -c myknn_mpi2.c
 
 # TEMP END
 
 clean:
-	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_omp2 myknn_mpi
+	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_omp2 myknn_mpi myknn_mpi2
