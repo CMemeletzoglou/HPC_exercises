@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 	assert(TRAINELEMS % train_block_size == 0);
 
 #if defined(DEBUG)
-	FILE *fpout = fopen("output.knn_omp2.txt","w");
+	FILE *fpout = fopen("output.knn_omp.txt","w");
 	double *yp_vals = malloc(QUERYELEMS * sizeof(double));
 	double *err_vals = malloc(QUERYELEMS * sizeof(double));
 #endif
