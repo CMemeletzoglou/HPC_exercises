@@ -36,19 +36,20 @@ myknn_omp: myknn_omp.o
 myknn_omp.o: myknn_omp.c
 	gcc $(CFLAGS) -ggdb -fopenmp -c myknn_omp.c
 
-# TEMP
-myknn_omp2: myknn_omp2.o
-	gcc -o myknn_omp2 myknn_omp2.o $(LDFLAGS) -fopenmp
-
-myknn_omp2.o: myknn_omp2.c
-	gcc -DSIMD $(CFLAGS) -ggdb -mavx -fopenmp -c myknn_omp2.c
-# TEMP - END
-
 myknn_mpi: myknn_mpi.o
 	mpicc -o myknn_mpi myknn_mpi.o $(LDFLAGS)
 
 myknn_mpi.o: myknn_mpi.c
 	mpicc $(CFLAGS) -DMPI -c myknn_mpi.c
+
+# TEMP BEGIN
+myknn_mpi2: myknn_mpi2.o
+	mpicc -o myknn_mpi2 myknn_mpi2.o $(LDFLAGS)
+
+myknn_mpi2.o: myknn_mpi2.c
+	mpicc $(CFLAGS) -c myknn_mpi.c
+
+# TEMP END
 
 clean:
 	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_omp2 myknn_mpi
