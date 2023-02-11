@@ -102,10 +102,6 @@ int main(int argc, char *argv[])
 
 #if defined(DEBUG)
 	FILE *fpout = fopen("output.knn_omp2.txt","w");
-        
-	// -------------------------------------
-	// -------------new arrays (?)----------
-	// -------------------------------------
         double *yp_vals = malloc(QUERYELEMS * sizeof(double));
 	double *err_vals = malloc(QUERYELEMS * sizeof(double));
 #endif
@@ -125,10 +121,11 @@ int main(int argc, char *argv[])
          * since the k-neighbor calculation for each Query Point, does not depend
          * on the k-neighbor calculation of the other Query Points.
          */
-        t_start = gettime();
+	t_start = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
         {
-                #pragma omp parallel for
+                #pragma omp parallel 
+		#pragma omp for nowait
                 for (int i = 0; i < QUERYELEMS; i++)
 			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
         }
@@ -204,12 +201,7 @@ int main(int argc, char *argv[])
 
 #if defined(DEBUG)
 	for (int i = 0; i < QUERYELEMS; i++)
-	{
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-
 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], err_vals[i]);
-	}
 #endif
         
 	double mse = sse / QUERYELEMS;
