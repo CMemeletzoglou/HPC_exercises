@@ -102,7 +102,7 @@ int main(int argc, char *argv[])
 
 #if defined(DEBUG)
 	FILE *fpout = fopen("output.knn_omp2.txt","w");
-        double *yp_vals = malloc(QUERYELEMS * sizeof(double));
+	double *yp_vals = malloc(QUERYELEMS * sizeof(double));
 	double *err_vals = malloc(QUERYELEMS * sizeof(double));
 #endif
 	
@@ -197,6 +197,9 @@ int main(int argc, char *argv[])
         // total running time (parallel blocking neighbor find + query point function value estimation calculation)
         t_total = t_end - t_start; 
 
+// *************************************************************************************
+// TODO : Try to make the file write in a parallel way (memory-mapped file (mmap etc))
+// *************************************************************************************
 #if defined(DEBUG)
 	for (int i = 0; i < QUERYELEMS; i++)
 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], err_vals[i]);
