@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
         double err_sum = 0.0;
 
 	size_t nthreads;
-        
+
 	t_start = gettime();
         /* Parallel + Blocking Query Point k-nearest neighbors calculation.
          * For each block of Training Points of size train_block_size,
@@ -122,44 +122,40 @@ int main(int argc, char *argv[])
          * since the k-neighbor calculation for each Query Point, does not depend
          * on the k-neighbor calculation of the other Query Points.
          */
-
-	#pragma omp parallel
+	#pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1) 
 	{
 		for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
 		{
 			#pragma omp for nowait
 			for (int i = 0; i < QUERYELEMS; i++)
-				compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
+				compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);			
 		}
-	}
 
-        /* After having found each Query Point's k-nearest neighbors, we proceed
-         * with the calculation of the estimated value for the target function,
-         * for each Query Point.
-         * 
-         * We explicitly manage the chunks of work assigned to each thread, 
-         * using the variables start and end, because if we just use a
-         * parallel for worksharing construct, if the DEBUG mode is enabled,
-         * a race condition would appear on the writing of the output logging file.
-         *
-         * Therefore, we use the variables start and end and the thread-local arrays
-         * yp, err, to gather the debugging info from each thread's computations.
-         * Then the thread-local information, is written on the shared arrays
-         * yp_vals, err_vals, where each thread writes in a different region of the
-         * arrays, defined by the start and end variables.
-         */
-        #pragma omp parallel reduction(+ : sse, err_sum, t_sum) private(t0, t1) 
-	{
 		size_t tid = omp_get_thread_num();
 
-		#pragma omp single
+		#pragma omp single		
 		nthreads = omp_get_num_threads();
 
 		size_t start = tid * (QUERYELEMS / nthreads);
 		size_t end = (tid + 1) * (QUERYELEMS / nthreads);
 		if (tid == nthreads - 1)
 			end = QUERYELEMS;
-	
+
+		/* After having found each Query Point's k-nearest neighbors, we proceed
+         	 * with the calculation of the estimated value for the target function,
+         	 * for each Query Point.
+         	 * 
+		 * We explicitly manage the chunks of work assigned to each thread, 
+		 * using the variables start and end, because if we just use a
+		 * parallel for worksharing construct, if the DEBUG mode is enabled,
+		 * a race condition would appear on the writing of the output logging file.
+		 *
+		 * Therefore, we use the variables start and end and the thread-local arrays
+		 * yp, err, to gather the debugging info from each thread's computations.
+		 * Then the thread-local information, is written on the shared arrays
+		 * yp_vals, err_vals, where each thread writes in a different region of the
+		 * arrays, defined by the start and end variables.
+		 */	
 	#if defined(DEBUG)
 		double yp[end - start + 1], err[end - start + 1];
 		size_t idx = 0;
@@ -197,7 +193,6 @@ int main(int argc, char *argv[])
 		}
 	#endif
 	}
-	
         t_end = gettime();
         // total running time (parallel blocking neighbor find + query point function value estimation calculation)
         t_total = t_end - t_start; 
