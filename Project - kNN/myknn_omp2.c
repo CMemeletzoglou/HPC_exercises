@@ -113,22 +113,25 @@ int main(int argc, char *argv[])
 
 	size_t nthreads;
         
+	t_start = gettime();
         /* Parallel + Blocking Query Point k-nearest neighbors calculation.
          * For each block of Training Points of size train_block_size,
          * find each Query Point's k neighbors using the Training Points of the
          * current block.
-         * We divide the iterations with each thread block to the available threads,
+         * We divide the iterations within each thread block to the available threads,
          * since the k-neighbor calculation for each Query Point, does not depend
          * on the k-neighbor calculation of the other Query Points.
          */
-	t_start = gettime();
-	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
-        {
-                #pragma omp parallel 
-		#pragma omp for nowait
-                for (int i = 0; i < QUERYELEMS; i++)
-			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
-        }
+
+	#pragma omp parallel
+	{
+		for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
+		{
+			#pragma omp for nowait
+			for (int i = 0; i < QUERYELEMS; i++)
+				compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
+		}
+	}
 
         /* After having found each Query Point's k-nearest neighbors, we proceed
          * with the calculation of the estimated value for the target function,
