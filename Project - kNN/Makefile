@@ -10,7 +10,7 @@ CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE)
 CFLAGS += -DSURROGATES -Wall
 LDFLAGS += -lm 
 
-all: gendata myknn myknn_omp myknn_omp2 myknn_mpi
+all: gendata myknn myknn_omp myknn_mpi myknn_mpi2
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -52,4 +52,4 @@ myknn_mpi2.o: myknn_mpi2.c
 # TEMP END
 
 clean:
-	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_omp2 myknn_mpi myknn_mpi2
+	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_mpi myknn_mpi2

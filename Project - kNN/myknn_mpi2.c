@@ -8,18 +8,10 @@
 #define PROBDIM 2
 #endif
 
-// My L1d = 192 KiB, and I want to cache the maximum amount of training points.
-// Each training point has a size of: PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
-// Thus, in L1d I may preserve in L1d cache 192,000 / 128 = 1,500 training points simultaneously.
-// I also need to be able to store in cache the query point aswell (!!)
-// and have a block size that will evenly devide TRAINELEMS.
-// The easy solution is to get the max power of 2 that is less that 1,500,
-// since TRAINELEMS is also a power of 2.
-// #define train_block_size 128
-
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
-static double ydata[TRAINELEMS];
+// static double ydata[TRAINELEMS]; // this must be changed
+static double *ydata; // this must be changed
 
 // double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
@@ -70,7 +62,8 @@ int main(int argc, char *argv[])
 	int trainelems_chunk = local_ntrainelems * vector_size; // chunk size in scalar elements (i.e. doubles)
 
 	double *mem = (double *)malloc(trainelems_chunk * sizeof(double));
-        double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
+	ydata = (double *)malloc(local_ntrainelems * sizeof(double)); // new .. global static array -> global dynamic array
+	double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t)); 
 
         // read a part of training data
@@ -82,7 +75,7 @@ int main(int argc, char *argv[])
 #if defined(DEBUG)
 	/* Create/Open an output file */
 	// FILE *fpout = fopen("output.knn_mpi.txt","w");
-	char *fout = "output.knn_mpi.txt";
+	char *filename = "output.knn_mpi.txt";
 #endif
 	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
@@ -148,27 +141,27 @@ int main(int argc, char *argv[])
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
 	
-	// receive buffer for a single query
-	// I will need enough space to store all query_t structs sent by every other rank.
-	query_t *rcv_buf = (query_t *)malloc((nprocs-1)*sizeof(query_t));
+	// Need enough space to store all query_t structs sent by every other rank.
+	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
 	// int global_train_offset = rank * local_ntrainelems;
 	int global_train_offset = trainelem_offset;
 	/* Each rank is responsible for calculating the k neighbors of each query point,
 	 * using only the training elements block it has been assigned. The block's boundaries are defined as:
-	 * start = rank * local_ntrainelems  (i.e. global_train_offset) // NOT entirely correct...
-	 * end = (rank + 1) * local_ntrainelems .
+	 * start = rank * local_ntrainelems * vector_size (i.e. global_train_offset) // NOT entirely correct...
+	 * end = (rank + 1) * local_ntrainelems * vector_size .
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 *
 	 * Within each block, each rank is responsible for :
-	 * a) Calculating the k neighbors of all query points
+	 * a) Calculating the k neighbors of **all** query points
 	 * b) Sending each query that it is not responsible for, to the correct rank.
 	 * c) Gathering collections of k neighbors for the subset of query points defined by [query_chunk_start, query_chunk_end].
-	 *    These collections are calculated (step a) sent (step b) by the other ranks (i.e. from other training elements blocks).
-	 * d) Calculating the final k nearest neighbors, using the collections gathered at step (b). (reduction)
+	 *    These collections are calculated (step a) and sent (step b) by the other ranks (i.e. from other training elements blocks).
+	 * d) Calculating the final k nearest neighbors, using the collections gathered at step (c). (reduction)
 	 */
 
 	t0 = gettime();
+
 	// (a) and (b) Calculate and send the k neighbors found in the training block for **all** query points.
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
@@ -191,20 +184,12 @@ int main(int argc, char *argv[])
 		}
 	
 		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
-		reduce_in_struct(&(queries[i]), rcv_buf, nprocs);
-	
+		reduce_in_struct(&(queries[i]), rcv_buf, nprocs);	
 	}
-
-	/* TODO: DELETE MEEEEE */
-	if (rank == 0)
-		printf("You may have forgot to remove exit(0)!!\n");
-	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Finalize();
-	exit(0);
-	
 	t1 = gettime();
 	t_sum = t1 - t0;
-	for (int i = 0; i < QUERYELEMS; i++)
+
+	for (int i = first_query; i <= last_query; i++) // run for all queries under the rank's responsibility
 	{
 		t0 = gettime();
 		double yp = find_knn_value(&(queries[i]), NNBS);
@@ -213,11 +198,20 @@ int main(int argc, char *argv[])
 		
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-#if defined(DEBUG)
-		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
-#endif
+// #if defined(DEBUG)
+// 		// fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
+// #endif
 		err_sum += err;
 	}
+	
+	MPI_Barrier(MPI_COMM_WORLD); // wait for all ranks to finish their computations
+	// get max time -> total execution time
+	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+#if defined(DEBUG)
+	// how are we going to replicate the write "%.5f %.5f %.2f\n", query_ydata[i], yp, err) ??
+	//store_binary_data_mpi(filename, ...)
+#endif
 
 	/* CALCULATE AND DISPLAY RESULTS */
 
@@ -238,13 +232,13 @@ int main(int argc, char *argv[])
 
 	/* CLEANUP */
 
-#if defined(DEBUG)
-	/* Close the output file */
-	fclose(fpout);
-#endif
+// #if defined(DEBUG)
+// 	/* Close the output file */
+// 	// fclose(fpout);
+// #endif
 
 #if defined(SIMD)
-	for (int i = 0; i < TRAINELEMS; i++)
+	for (int i = 0; i < local_ntrainelems; i++)
 		free(xdata[i]);
 #endif
 	free(xdata);
@@ -252,6 +246,10 @@ int main(int argc, char *argv[])
 	free(query_ydata);
 	free(query_mem);
 	free(queries);
+	
+	free(ydata); // new
+	free(rcv_buf);
 
+	MPI_Finalize();
 	return 0;
 }
