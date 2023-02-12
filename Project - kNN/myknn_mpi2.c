@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
         if(rank == nprocs - 1)
                 local_ntrainelems += TRAINELEMS % nprocs;
 
-	size_t trainelems_chunk = local_ntrainelems * vector_size; // chunk size in scalar elements (i.e. doubles)
+	int trainelems_chunk = local_ntrainelems * vector_size; // chunk size in scalar elements (i.e. doubles)
 
 	double *mem = (double *)malloc(trainelems_chunk * sizeof(double));
         double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
@@ -78,18 +78,6 @@ int main(int argc, char *argv[])
 
         // read all of the query data
         load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);
-
-	/* ********************************************************************************************
-	 * The following seem irrelevant now that we assign a part of the training data to each rank.
-	 * Now the blocking happens using the part of the training data assigned to each rank.
-	 *
- 	int L1d_size, train_block_size = 1;
-	get_L1d_size(&L1d_size); // get L1d cache size
-	// calculate the appropriate train block size as the previous power of 2
-	if(L1d_size > 0)
-		train_block_size = pow(2, floor(log2((L1d_size * 1000) / (PROBDIM * sizeof(double)))));
-	 * ********************************************************************************************
-	 */
 
 #if defined(DEBUG)
 	/* Create/Open an output file */
@@ -102,7 +90,7 @@ int main(int argc, char *argv[])
 	 * We either going to use the xdata of two points (ex. when calculating distance from one another)
 	 * or use ydata (surrogates) (ex. when predicting the value of a query point)
 	 */
-	xdata = (double **)malloc(local_ntrainelems * sizeof(double *));
+	xdata = (double **)malloc(local_ntrainelems * sizeof(double*));
 
 #if defined(SIMD)
 	int posix_res;
@@ -123,7 +111,7 @@ int main(int argc, char *argv[])
 	/* Configure and Initialize the ydata handler arrays */
 	double *query_ydata = malloc(QUERYELEMS * sizeof(double));
 	
-	for (int i = 0; i < TRAINELEMS; i++)
+	for (int i = 0; i < local_ntrainelems; i++)
 	{
 #if defined(SURROGATES)
 		ydata[i] = mem[i * (PROBDIM + 1) + PROBDIM];
@@ -141,70 +129,81 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-	assert(TRAINELEMS % train_block_size == 0);
+	// assert(TRAINELEMS % train_block_size == 0);
+	// assert(TRAINELEMS % local_ntrainelems == 0);
 
 	/* COMPUTATION PART */
-
 	double t0, t1, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
 	double err, err_sum = 0.0;
 
-	int local_nqueryelems = QUERYELEMS / nprocs;
+	int queryelems_blocksize = QUERYELEMS / nprocs;
+	int rank_in_charge;
+	MPI_Request request = MPI_REQUEST_NULL;
+	MPI_Status status;
 
-	int chunk_start = rank * local_nqueryelems * vector_size;
-	int chunk_end = (rank + 1) * local_nqueryelems * vector_size;
+	int first_query = rank * queryelems_blocksize;
+	int last_query = (rank + 1) * queryelems_blocksize - 1;
+	
 	if (rank == nprocs - 1)
-	{
-		local_nqueryelems += QUERYELEMS % nprocs;
-		chunk_end = QUERYELEMS;
-	}
+		last_query = QUERYELEMS - 1;
+	
+	// receive buffer for a single query
+	// I will need enough space to store all query_t structs sent by every other rank.
+	query_t *rcv_buf = (query_t *)malloc((nprocs-1)*sizeof(query_t));
 
-	query_t *rcv_buf = (query_t *)malloc(sizeof(query_t)); // receive buffer 
-
-	// int rank_block_offset = rank * train_block_size;
-	int rank_block_offset = trainelem_offset;
+	// int global_train_offset = rank * local_ntrainelems;
+	int global_train_offset = trainelem_offset;
 	/* Each rank is responsible for calculating the k neighbors of each query point,
-	 * within a training elements block, whose boundaries are defined as:
-	 * start = rank * train_block_size  (i.e. rank_block_offset) // NOT entirely correct...
-	 * end = (rank + 1) * train_block_size .
+	 * using only the training elements block it has been assigned. The block's boundaries are defined as:
+	 * start = rank * local_ntrainelems  (i.e. global_train_offset) // NOT entirely correct...
+	 * end = (rank + 1) * local_ntrainelems .
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 *
-	 * Within each block, each rank is responsible for : a) calculating the k neighbors of a
-	 * subset of query points and b) gathering the k neighbors calculated for this exact subset
-	 * of query points, by other ranks (i.e. from other training elements blocks).
-
-	 * The subset of query points under the responsibility of the current rank, is defined by
-	 * chunk_start = rank * (QUERYELEMS / nprocs) (i.e rank * local_nqueryelems)
-	 * chunk_end = (rank + 1) * (QUERYELEMS / nprocs) .
+	 * Within each block, each rank is responsible for :
+	 * a) Calculating the k neighbors of all query points
+	 * b) Sending each query that it is not responsible for, to the correct rank.
+	 * c) Gathering collections of k neighbors for the subset of query points defined by [query_chunk_start, query_chunk_end].
+	 *    These collections are calculated (step a) sent (step b) by the other ranks (i.e. from other training elements blocks).
+	 * d) Calculating the final k nearest neighbors, using the collections gathered at step (b). (reduction)
 	 */
+
 	t0 = gettime();
+	// (a) and (b) Calculate and send the k neighbors found in the training block for **all** query points.
+	for (int i = 0; i < QUERYELEMS; i++)
+	{
+		compute_knn_brute_force_mpi(xdata, &(queries[i]), PROBDIM, NNBS, global_train_offset, local_ntrainelems);
+		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
+		if (rank_in_charge != rank)
+			MPI_Isend(&(queries[i]), 1*sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);
+	}
 
-	/* Calculate the k neighbors for **all** query points within the training block
-	 * under each rank's control. 
-	 * Then exchange all query elements that are not under the rank's responsibility,
-	 * and wait to receive from the other ranks.
-	 */
-	for (int i = chunk_start; i < chunk_end; i++)
-		compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, rank_block_offset, train_block_size);
+	int rcv_buf_offset = 0;
+	for (int i = first_query; i <= last_query; i++)
+	{
+		// (c) Gather the collections of k nearest neighbors sent by the other ranks.
+		rcv_buf_offset = 0;
+		for (int j = 0; j < nprocs; j++)
+		{
+			if (j == rank)
+				continue;
+			MPI_Recv(&(rcv_buf[rcv_buf_offset++]), 1*sizeof(query_t), MPI_BYTE, j, i, MPI_COMM_WORLD, &status);
+		}
+	
+		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
+		reduce_in_struct(&(queries[i]), rcv_buf, nprocs);
+	
+	}
 
-	MPI_Send(queries + chunk_end, local_nqueryelems, MPI_BYTE, rank + 1, 0, MPI_COMM_WORLD); // ?? send to next rank ??
-
-	/* here we need to send and receive and update the k neighbors of each query points under our control
-	 * using the data we received from the other ranks.
-	 * However, how are going to send and receive objects of type query_t ?
-	 * Maybe use something like MPI_Send(sizeof(query_t), MPI_BYTE), i.e. send it over as bytes
-	 */
+	/* TODO: DELETE MEEEEE */
+	if (rank == 0)
+		printf("You may have forgot to remove exit(0)!!\n");
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Finalize();
+	exit(0);
+	
 	t1 = gettime();
 	t_sum = t1 - t0;
-
-	// t0 = gettime();
-	// for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
-	// 	for (int i = 0; i < QUERYELEMS; i++)
-	// 		compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, train_block_size);
-
-	// t1 = gettime();
-	// t_sum = t1 - t0;
-
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
 		t0 = gettime();
@@ -219,7 +218,7 @@ int main(int argc, char *argv[])
 #endif
 		err_sum += err;
 	}
-	
+
 	/* CALCULATE AND DISPLAY RESULTS */
 
 	double mse = sse / QUERYELEMS;
