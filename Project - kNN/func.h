@@ -363,7 +363,7 @@ double compute_distance(double *pat1, double *pat2, int lpat, int norm)
 void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int global_block_offset, int mpi_block_offset, int block_size)
 {									  
 	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
-	 * mpi_block_offset : use this in case you have blocking for mpi (i.e. blocking on the local block)
+	 * mpi_block_offset : use this in case you have training elements blocking for MPI (i.e. blocking on the local block)
 	 * block_size : the amount of training elements in xdata to iterate over,
 	 * 				starting from index (global_block_offset + mpi_block_offset)
 	 */
@@ -375,7 +375,7 @@ void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int glo
 	max_d = compute_max_pos(q->nn_d, k, &max_i);
 	for (i = 0; i < block_size; i++) // i runs inside each training block's boundaries
 	{
-		gi = i + block_start;
+		gi = block_start + i;
 #if defined(MPI)
 		xdata_idx = i;
 #else

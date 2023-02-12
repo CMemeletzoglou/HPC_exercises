@@ -47,7 +47,7 @@ myknn_mpi2: myknn_mpi2.o
 	mpicc -o myknn_mpi2 myknn_mpi2.o $(LDFLAGS)
 
 myknn_mpi2.o: myknn_mpi2.c
-	mpicc $(CFLAGS) -c myknn_mpi2.c
+	mpicc $(CFLAGS) -DMPI -c myknn_mpi2.c
 
 # TEMP END
 
