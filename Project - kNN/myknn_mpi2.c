@@ -10,7 +10,6 @@
 
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
-// static double ydata[TRAINELEMS]; // this must be changed
 static double *ydata; // this must be changed
 
 // double find_knn_value(double *p, int n, int knn)
@@ -52,7 +51,7 @@ int main(int argc, char *argv[])
         MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
         
         int vector_size = PROBDIM + 1;
-        int local_ntrainelems = TRAINELEMS / nprocs;        
+        int local_ntrainelems = TRAINELEMS / nprocs;
         int trainelem_offset = rank * local_ntrainelems * vector_size;
         
         // correction for the last process
@@ -62,7 +61,7 @@ int main(int argc, char *argv[])
 	int trainelems_chunk = local_ntrainelems * vector_size; // chunk size in scalar elements (i.e. doubles)
 
 	double *mem = (double *)malloc(trainelems_chunk * sizeof(double));
-	ydata = (double *)malloc(local_ntrainelems * sizeof(double)); // new .. global static array -> global dynamic array
+	ydata = (double *)malloc(local_ntrainelems * sizeof(double));
 	double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t)); 
 
@@ -144,8 +143,7 @@ int main(int argc, char *argv[])
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
-	// int global_train_offset = rank * local_ntrainelems;
-	int global_train_offset = trainelem_offset;
+	int global_block_offset = rank * local_ntrainelems;
 	/* Each rank is responsible for calculating the k neighbors of each query point,
 	 * using only the training elements block it has been assigned. The block's boundaries are defined as:
 	 * start = rank * local_ntrainelems * vector_size (i.e. global_train_offset) // NOT entirely correct...
@@ -163,9 +161,12 @@ int main(int argc, char *argv[])
 	t0 = gettime();
 
 	// (a) and (b) Calculate and send the k neighbors found in the training block for **all** query points.
+
+	// TODO: one more loop here for the case of "cache blocking"
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
-		compute_knn_brute_force_mpi(xdata, &(queries[i]), PROBDIM, NNBS, global_train_offset, local_ntrainelems);
+		compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
+
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
 		if (rank_in_charge != rank)
 			MPI_Isend(&(queries[i]), 1*sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);

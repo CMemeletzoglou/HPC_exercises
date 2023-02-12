@@ -360,22 +360,31 @@ double compute_distance(double *pat1, double *pat2, int lpat, int norm)
 	return dist;	// compute_root(dist);
 }
 
-// npat -> TRAINELEMS
-// lpat -> PROBDIM
-// void compute_knn_brute_force(double **xdata, query_t *q, int npat, int lpat, int knn, int *nn_x, double *nn_d)
-void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int train_data_offset, int num_train_data)
-{
-	int i, max_i;
+void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int global_block_offset, int mpi_block_offset, int block_size)
+{									  
+	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
+	 * mpi_block_offset : use this in case you have blocking for mpi (i.e. blocking on the local block)
+	 * block_size : the amount of training elements in xdata to iterate over,
+	 * 				starting from index (global_block_offset + mpi_block_offset)
+	 */
+	int i, gi, xdata_idx, max_i;
 	double max_d, new_d;
 
+	int block_start = global_block_offset + mpi_block_offset;
 	// find K neighbors
 	max_d = compute_max_pos(q->nn_d, k, &max_i);
-	for (i = train_data_offset; i < train_data_offset + num_train_data; i++) // i runs inside each training block's boundaries
+	for (i = 0; i < block_size; i++) // i runs inside each training block's boundaries
 	{
-		new_d = compute_dist(q->x, xdata[i], dim); // euclidean		
+		gi = i + block_start;
+#if defined(MPI)
+		xdata_idx = i;
+#else
+		xdata_idx = gi;
+#endif
+		new_d = compute_dist(q->x, xdata[xdata_idx], dim); // euclidean		
 		if (new_d < max_d) // add point to the list of knns, replace element max_i
 		{	
-			q->nn_idx[max_i] = i;
+			q->nn_idx[max_i] = gi;
 			q->nn_d[max_i] = new_d;
 		}
 		max_d = compute_max_pos(q->nn_d, k, &max_i);

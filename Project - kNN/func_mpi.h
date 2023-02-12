@@ -72,46 +72,6 @@ void store_binary_data_mpi(const char *filename, double *data, const int N, int 
         MPI_File_close(&f); 
 }
 
-void compute_knn_brute_force_mpi(double **xdata, query_t *q, int dim, int k, int train_data_offset, int num_train_data)
-{
-	int i, gi, max_i;
-	double max_d, new_d;
-
-	// find K neighbors
-	max_d = compute_max_pos(q->nn_d, k, &max_i);
-	for (i = 0; i < num_train_data; i++) // i runs inside each training block's boundaries
-	{
-		gi = i + train_data_offset;
-		new_d = compute_dist(q->x, xdata[i], dim); // euclidean		
-		if (new_d < max_d) // add point to the list of knns, replace element max_i
-		{	
-			q->nn_idx[max_i] = gi;
-			q->nn_d[max_i] = new_d;
-		}
-		max_d = compute_max_pos(q->nn_d, k, &max_i);
-	}
-
-	/* sort the knn list */ // bubble sort
-	// int temp_x, j;
-	// double temp_d;
-	// for (i = (knn - 1); i > 0; i--)
-	// {
-	// 	for (j = 1; j <= i; j++)
-	// 	{
-	// 		if (nn_d[j-1] > nn_d[j])
-	// 		{
-	// 			temp_d = nn_d[j-1];
-	// 			nn_d[j-1] = nn_d[j];
-	// 			nn_d[j] = temp_d;
-				
-	// 			temp_x = nn_x[j-1];
-	// 			nn_x[j-1] = nn_x[j];
-	// 			nn_x[j] = temp_x;
-	// 		}
-	// 	}
-	// }
-}
-
 // TODO: Check if inline is useful or even helpfull
 // https://stackoverflow.com/questions/1932311/when-to-use-the-inline-function-and-when-not-to-use-it
 inline int get_rank_in_charge_of(int query_idx, int query_blocksize, int mpi_comm_size)
