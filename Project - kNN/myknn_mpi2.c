@@ -68,10 +68,12 @@ int main(int argc, char *argv[])
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t)); 
 
         // read a part of training data
-        load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
+        // load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
 
         // read all of the query data
         load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);
+	// load_binary_data(queryfile, query_mem, queries, QUERYELEMS * vector_size);
+
 
 	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
@@ -90,11 +92,11 @@ int main(int argc, char *argv[])
 		posix_res = posix_memalign((void **)(&(xdata[i])), 32, PROBDIM * sizeof(double));
 		assert(posix_res == 0);
 	}
-	copy_to_aligned(mem, xdata, (PROBDIM+1), PROBDIM, TRAINELEMS);
+	copy_to_aligned(mem, xdata, vector_size, PROBDIM, TRAINELEMS);
 #else
 	// Assign to the handler arrays, pointers to the already allocated mem
 	for (int i = 0; i < local_ntrainelems; i++)
-		xdata[i] = &mem[i*(PROBDIM + 1)];
+		xdata[i] = &mem[i * vector_size];
 #endif
 
 	/* Configure and Initialize the ydata handler arrays */
@@ -103,7 +105,7 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < local_ntrainelems; i++)
 	{
 #if defined(SURROGATES)
-		ydata[i] = mem[i * (PROBDIM + 1) + PROBDIM];
+		ydata[i] = mem[i * vector_size + PROBDIM];
 #else
 		ydata[i] = 0;
 #endif
@@ -112,10 +114,26 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
 #if defined(SURROGATES)
-		query_ydata[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
+		query_ydata[i] = query_mem[i * vector_size + PROBDIM];
 #else
 		query_ydata[i] = 0;
 #endif
+	}
+
+	if(rank == 0)
+	{
+		for (int i = 0; i < QUERYELEMS; i++)
+			printf("Rank 0, query_ydata[%d] = %.5f\n", i, query_mem[i * vector_size + PROBDIM-4]);
+	}
+	MPI_Finalize();
+	return 0;
+
+	double *yp_vals_buf = NULL, *err_vals_buf = NULL;
+	// buffers to receive calculated values and resulting errors
+	if(rank == 0)
+	{
+		yp_vals_buf = (double*)malloc(QUERYELEMS * sizeof(double));
+		err_vals_buf = (double*)malloc(QUERYELEMS * sizeof(double));
 	}
 
 	// assert(TRAINELEMS % train_block_size == 0);
@@ -124,7 +142,7 @@ int main(int argc, char *argv[])
 	/* COMPUTATION PART */
 	double t0, t1, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
-	double err, err_sum = 0.0;
+	double err_sum = 0.0;
 
 	int queryelems_blocksize = QUERYELEMS / nprocs;
 	int rank_in_charge;
@@ -133,7 +151,7 @@ int main(int argc, char *argv[])
 
 	int first_query = rank * queryelems_blocksize;
 	int last_query = (rank + 1) * queryelems_blocksize - 1;
-	
+
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
 	
@@ -171,7 +189,7 @@ int main(int argc, char *argv[])
 
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
 		if (rank_in_charge != rank)
-			MPI_Isend(&(queries[i]), 1*sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);
+			MPI_Isend(&(queries[i]), 1 * sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);
 	}
 
 	int rcv_buf_offset = 0;
@@ -183,35 +201,71 @@ int main(int argc, char *argv[])
 		{
 			if (j == rank)
 				continue;
-			MPI_Recv(&(rcv_buf[rcv_buf_offset++]), 1*sizeof(query_t), MPI_BYTE, j, i, MPI_COMM_WORLD, &status);
+			MPI_Recv(&(rcv_buf[rcv_buf_offset++]), 1 * sizeof(query_t), MPI_BYTE, j, i, MPI_COMM_WORLD, &status);
 		}
-	
+
 		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
 		reduce_in_struct(&(queries[i]), rcv_buf, nprocs);	
 	}
 	t1 = gettime();
 	t_sum = t1 - t0;
 
+// TODO :
+// actually not all of the query_ydata is needed since it is only used to calculate error metrics,
+// from results that concern the queries under the control of the current rank.
+#if defined(DEBUG)
+	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
+	int idx = 0;
+#else
+	double yp, err;
+#endif
 	for (int i = first_query; i <= last_query; i++) // run for all queries under the rank's responsibility
 	{
 		t0 = gettime();
-		double yp = find_knn_value(&(queries[i]), NNBS);
+	#if defined(DEBUG)
+		yp[idx] = find_knn_value(&(queries[i]), NNBS);
+	#else
+		yp = find_knn_value(&(queries[i]), NNBS);
+	#endif
 		t1 = gettime();
 		t_sum += t1 - t0;
 
+	#if defined(DEBUG)
+		sse += (query_ydata[i] - yp[idx]) * (query_ydata[i] - yp[idx]);
+		err[idx] = 100.0 * fabs((yp[idx] - query_ydata[i]) / query_ydata[i]);
+		err_sum += err[idx];		
+
+		if(rank == 0)
+			printf("rank 0, yp[%d] = %.5f\terr[%d] = %.5f\tquery_ydata[%d] = %.5f\n", idx, yp[idx], idx, err[idx], idx, query_ydata[idx]);
+
+		idx++;
+	#else
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-#if defined(DEBUG)
-		// fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
-		// char buf[3 * sizeof(double) + sizeof(char)];
-                MPI_File_write_at(f, base, buf, strlen(buf), MPI_CHAR, MPI_STATUS_IGNORE);
-		//  sizeof(buf)*(i-first_query)
-
-#endif
-		err_sum += err;
+	#endif
 	}
 
+#if defined(DEBUG)
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	MPI_Gather(yp, last_query - first_query + 1, MPI_DOUBLE, yp_vals_buf, QUERYELEMS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	
+	MPI_Gather(err, last_query - first_query + 1, MPI_DOUBLE, err_vals_buf, QUERYELEMS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+#endif
+
 	MPI_Barrier(MPI_COMM_WORLD); // wait for all ranks to finish their computations
+
+	if(rank == 0)
+	{
+		FILE *fout = fopen(filename, "w");
+
+		for (int i = 0; i < QUERYELEMS; i++)
+			fprintf(fout, "yp_vals_buf[%d] = %.5f\n", i, yp_vals_buf[i]);
+		// fprintf(fout, "%.5f %.5f %.2f\n", query_ydata[i], yp_vals_buf[i], err_vals_buf[i]);
+
+		fclose(fout);
+	}
+
 	MPI_Finalize();
 	return 0;
 
@@ -247,7 +301,7 @@ int main(int argc, char *argv[])
 	/* Close the output file */
 	// fclose(fpout);
 
-	MPI_File_close(&f);
+	// MPI_File_close(&f);
 #endif
 
 #if defined(SIMD)

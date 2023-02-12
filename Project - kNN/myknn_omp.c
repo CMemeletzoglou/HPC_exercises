@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 		 */	
 	#if defined(DEBUG)
 		double yp[end - start + 1], err[end - start + 1];
-		size_t idx = 0;
+		int idx = 0;
 	#else
 		double yp;
 	#endif
