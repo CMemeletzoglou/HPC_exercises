@@ -431,9 +431,9 @@ double predict_value(int dim, int knn, double *xdata, double *ydata)
 
 	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg
 	__m256d _ydata;
-	int knn_distiv4 = knn / 4;
+	int knn_div4 = knn / 4;
 
-	for (int i = 0; i < knn_distiv4; i++)
+	for (int i = 0; i < knn_div4; i++)
 	{
 		_ydata = _mm256_load_pd(ydata + 4 * i); // load groups of 4 elements of the vector 
 		_sum_v = _mm256_add_pd(_sum_v, _ydata); // vertically add them into the sum vector reg
@@ -452,7 +452,7 @@ double predict_value(int dim, int knn, double *xdata, double *ydata)
 
 	// handle the remaining entries
 	double sum = 0.0f;
-	for (int i = knn_distiv4 * 4; i < knn; i++)
+	for (int i = knn_div4 * 4; i < knn; i++)
 		sum += ydata[i];
 
 	sum_value+= sum;

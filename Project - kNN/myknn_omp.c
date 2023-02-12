@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
 		{
 			#pragma omp for nowait
 			for (int i = 0; i < QUERYELEMS; i++)
-				compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, 0, train_block_size);			
+				compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, train_offset, 0, train_block_size);			
 		}
 
 		size_t tid = omp_get_thread_num();

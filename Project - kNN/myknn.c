@@ -132,7 +132,7 @@ int main(int argc, char *argv[])
 	t0 = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
 		for (int i = 0; i < QUERYELEMS; i++)
-			compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, train_offset, 0, train_block_size);
+			compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, train_offset, 0, train_block_size);
 
 	t1 = gettime();
 	t_sum = t1 - t0;
