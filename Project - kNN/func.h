@@ -19,7 +19,8 @@ typedef struct query_s
 	// __attribute__((aligned(32))) double x[PROBDIM]; // Query's coordinate
 	double *x;
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
-	double nn_d[NNBS]; // The distance between the query point and each one of the k nearest neighbors
+	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
+	double nn_val[NNBS];
 } query_t;
 
 /* I/O routines */
@@ -66,7 +67,7 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 				queries[i].nn_idx[j] = -1;
 
 			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_d[j] = 1e99 - j;
+				queries[i].nn_dist[j] = 1e99 - j;
 		}
 	}
 }
@@ -360,7 +361,7 @@ double compute_distance(double *pat1, double *pat2, int lpat, int norm)
 	return dist;	// compute_root(dist);
 }
 
-void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int global_block_offset, int mpi_block_offset, int block_size)
+void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim, int k, int global_block_offset, int mpi_block_offset, int block_size)
 {									  
 	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
 	 * mpi_block_offset : use this in case you have training elements blocking for MPI (i.e. blocking on the local block)
@@ -372,7 +373,7 @@ void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int glo
 
 	int block_start = global_block_offset + mpi_block_offset;
 	// find K neighbors
-	max_d = compute_max_pos(q->nn_d, k, &max_i);
+	max_d = compute_max_pos(q->nn_dist, k, &max_i);
 	for (i = 0; i < block_size; i++) // i runs inside each training block's boundaries
 	{
 		gi = block_start + i;
@@ -385,9 +386,10 @@ void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int glo
 		if (new_d < max_d) // add point to the list of knns, replace element max_i
 		{	
 			q->nn_idx[max_i] = gi;
-			q->nn_d[max_i] = new_d;
+			q->nn_dist[max_i] = new_d;
+			q->nn_val[max_i] = ydata[xdata_idx];
 		}
-		max_d = compute_max_pos(q->nn_d, k, &max_i);
+		max_d = compute_max_pos(q->nn_dist, k, &max_i);
 	}
 
 	/* sort the knn list */ // bubble sort
@@ -397,11 +399,11 @@ void compute_knn_brute_force(double **xdata, query_t *q, int dim, int k, int glo
 	// {
 	// 	for (j = 1; j <= i; j++)
 	// 	{
-	// 		if (nn_d[j-1] > nn_d[j])
+	// 		if (nn_dist[j-1] > nn_dist[j])
 	// 		{
-	// 			temp_d = nn_d[j-1];
-	// 			nn_d[j-1] = nn_d[j];
-	// 			nn_d[j] = temp_d;
+	// 			temp_d = nn_dist[j-1];
+	// 			nn_dist[j-1] = nn_dist[j];
+	// 			nn_dist[j] = temp_d;
 				
 	// 			temp_x = nn_x[j-1];
 	// 			nn_x[j-1] = nn_x[j];
@@ -429,9 +431,9 @@ double predict_value(int dim, int knn, double *xdata, double *ydata)
 
 	__m256d _sum_v = _mm256_setzero_pd(); // zero-out the sum vector reg
 	__m256d _ydata;
-	int knn_div4 = knn / 4;
+	int knn_distiv4 = knn / 4;
 
-	for (int i = 0; i < knn_div4; i++)
+	for (int i = 0; i < knn_distiv4; i++)
 	{
 		_ydata = _mm256_load_pd(ydata + 4 * i); // load groups of 4 elements of the vector 
 		_sum_v = _mm256_add_pd(_sum_v, _ydata); // vertically add them into the sum vector reg
@@ -450,7 +452,7 @@ double predict_value(int dim, int knn, double *xdata, double *ydata)
 
 	// handle the remaining entries
 	double sum = 0.0f;
-	for (int i = knn_div4 * 4; i < knn; i++)
+	for (int i = knn_distiv4 * 4; i < knn; i++)
 		sum += ydata[i];
 
 	sum_value+= sum;

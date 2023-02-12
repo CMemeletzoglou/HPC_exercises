@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
@@ -7,7 +8,7 @@
 #ifndef PROBDIM
 #define PROBDIM 2
 #endif
-
+#define DEBUG 1
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double *ydata; // this must be changed
@@ -24,11 +25,12 @@ double find_knn_value(query_t *q, int knn)
 #endif	
 
 	for (int i = 0; i < knn; i++)
-		fd[i] = ydata[q->nn_idx[i]];
+		fd[i] = q->nn_val[i];
+		// fd[i] = ydata[q->nn_idx[i]];
 
-	for (int i = 0; i < knn; i++) 
+/* 	for (int i = 0; i < knn; i++) 
 		for (int j = 0; j < PROBDIM; j++)
-			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
+			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j]; */
 
 	return predict_value(PROBDIM, knn, xd, fd);
 }
@@ -71,11 +73,6 @@ int main(int argc, char *argv[])
         // read all of the query data
         load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);
 
-#if defined(DEBUG)
-	/* Create/Open an output file */
-	// FILE *fpout = fopen("output.knn_mpi.txt","w");
-	char *filename = "output.knn_mpi.txt";
-#endif
 	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
 	 * in order to perform a computation.
@@ -140,6 +137,11 @@ int main(int argc, char *argv[])
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
 	
+#if defined(DEBUG)
+	/* Create/Open an output file */
+	// FILE *fpout = fopen("output.knn_mpi.txt","w");
+	char *filename = "output.knn_mpi.txt";
+#endif
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
@@ -165,7 +167,7 @@ int main(int argc, char *argv[])
 	// TODO: one more loop here for the case of "cache blocking"
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
-		compute_knn_brute_force(xdata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
+		compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
 
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
 		if (rank_in_charge != rank)
@@ -196,16 +198,24 @@ int main(int argc, char *argv[])
 		double yp = find_knn_value(&(queries[i]), NNBS);
 		t1 = gettime();
 		t_sum += t1 - t0;
-		
+
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-// #if defined(DEBUG)
-// 		// fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
-// #endif
+#if defined(DEBUG)
+		// fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
+		// char buf[3 * sizeof(double) + sizeof(char)];
+                MPI_File_write_at(f, base, buf, strlen(buf), MPI_CHAR, MPI_STATUS_IGNORE);
+		//  sizeof(buf)*(i-first_query)
+
+#endif
 		err_sum += err;
 	}
-	
+
 	MPI_Barrier(MPI_COMM_WORLD); // wait for all ranks to finish their computations
+	MPI_Finalize();
+	return 0;
+
+        
 	// get max time -> total execution time
 	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
@@ -233,10 +243,12 @@ int main(int argc, char *argv[])
 
 	/* CLEANUP */
 
-// #if defined(DEBUG)
-// 	/* Close the output file */
-// 	// fclose(fpout);
-// #endif
+#if defined(DEBUG)
+	/* Close the output file */
+	// fclose(fpout);
+
+	MPI_File_close(&f);
+#endif
 
 #if defined(SIMD)
 	for (int i = 0; i < local_ntrainelems; i++)

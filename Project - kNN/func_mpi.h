@@ -37,7 +37,7 @@ void load_binary_data_mpi(const char *filename, double *data, query_t *queries, 
 				queries[i].nn_idx[j] = -1;
 
 			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_d[j] = 1e99 - j;
+				queries[i].nn_dist[j] = 1e99 - j;
 		}
 	}
 
@@ -74,19 +74,19 @@ void store_binary_data_mpi(const char *filename, double *data, const int N, int 
 
 // TODO: Check if inline is useful or even helpfull
 // https://stackoverflow.com/questions/1932311/when-to-use-the-inline-function-and-when-not-to-use-it
-inline int get_rank_in_charge_of(int query_idx, int query_blocksize, int mpi_comm_size)
+int get_rank_in_charge_of(int query_idx, int query_blocksize, int mpi_comm_size)
 {
 	int rank = query_idx / query_blocksize;
 	int max_rank = mpi_comm_size - 1;
 	return rank > max_rank ? max_rank : rank;
 }
 
-int get_max_dist_neighbor(double *nn_d, int k)
+int get_max_dist_neighbor(double *nn_dist, int k)
 {
 	int max_idx = 0;
 	for (int i = 1; i < k; i++)
 	{
-		if (nn_d[max_idx] < nn_d[i])
+		if (nn_dist[max_idx] < nn_dist[i])
 			max_idx = i;
 	}
 
@@ -100,14 +100,14 @@ void reduce_in_struct(query_t *query, query_t *received, int received_size)
 	for (int i = 0; i < received_size; i++)
 	{
 		// TODO: Find a better way to calculate the k nearest neighbors
-		max_idx = get_max_dist_neighbor(query->nn_d, NNBS);
+		max_idx = get_max_dist_neighbor(query->nn_dist, NNBS);
 		for (int j = 0; j < NNBS; j++)
 		{
-			if (query->nn_d[max_idx] > received[i].nn_d[j])
+			if (query->nn_dist[max_idx] > received[i].nn_dist[j])
 			{
-				query->nn_d[max_idx] = received[i].nn_d[j];
+				query->nn_dist[max_idx] = received[i].nn_dist[j];
 				query->nn_idx[max_idx] = received[i].nn_idx[j];
-				max_idx = get_max_dist_neighbor(query->nn_d, NNBS);
+				max_idx = get_max_dist_neighbor(query->nn_dist, NNBS);
 			}
 		}
 	}
