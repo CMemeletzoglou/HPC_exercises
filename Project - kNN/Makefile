@@ -40,14 +40,14 @@ myknn_mpi: myknn_mpi.o
 	mpicc -o myknn_mpi myknn_mpi.o $(LDFLAGS)
 
 myknn_mpi.o: myknn_mpi.c
-	mpicc $(CFLAGS) -DMPI -c myknn_mpi.c
+	mpicc -DMPI -DSIMD $(CFLAGS) -c myknn_mpi.c
 
 # TEMP BEGIN
 myknn_mpi2: myknn_mpi2.o
 	mpicc -o myknn_mpi2 myknn_mpi2.o $(LDFLAGS)
 
 myknn_mpi2.o: myknn_mpi2.c
-	mpicc $(CFLAGS) -DMPI -c myknn_mpi2.c
+	mpicc -DMPI -DSIMD $(CFLAGS) -c myknn_mpi2.c
 
 # TEMP END
 

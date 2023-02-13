@@ -71,9 +71,9 @@ int main(int argc, char *argv[])
         load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
 
         // read all of the query data
-        load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);
+        load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);        
 
-	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
+	/* Create a handler array that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
 	 * in order to perform a computation.
 	 * We either going to use the xdata of two points (ex. when calculating distance from one another)
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 		posix_res = posix_memalign((void **)(&(xdata[i])), 32, PROBDIM * sizeof(double));
 		assert(posix_res == 0);
 	}
-	copy_to_aligned(mem, xdata, vector_size, PROBDIM, TRAINELEMS);
+	copy_to_aligned(mem, xdata, vector_size, PROBDIM, local_ntrainelems);
 #else
 	// Assign to the handler arrays, pointers to the already allocated mem
 	for (int i = 0; i < local_ntrainelems; i++)
@@ -118,10 +118,10 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-        /* DECIDE ON SIZE OF IN-RANK BLOCK */
-        // TODO: Think about last rank, which may have more local training elements, the assert may not succeed
-        //       you probably only need to correct the last iteration (?)
-        // int L1d_size, train_block_size = 1;
+	/* DECIDE ON SIZE OF IN-RANK BLOCK */
+	// TODO: Think about last rank, which may have more local training elements, the assert may not succeed
+	//       you probably only need to correct the last iteration (?)
+	// int L1d_size, train_block_size = 1;
 	// get_L1d_size(&L1d_size); // get L1d cache size
 	// // calculate the appropriate train block size as the previous power of 2
 	// if(L1d_size > 0)
@@ -180,15 +180,16 @@ int main(int argc, char *argv[])
 	int rcv_buf_offset = 0;
 	for (int i = first_query; i <= last_query; i++)
 	{
-		// (c) Gather the collections of k nearest neighbors sent by the other ranks.
-                // TODO(?): Make the Recvs async, once you receive a collection (for any query you are in charge of)
-                //          reduce_in_struct immediately.
-                // Discussion about callback function on an async request: 
-                // https://stackoverflow.com/questions/49763675/is-it-possible-to-attach-a-callback-to-be-executed-on-a-request-completion
-                //
-                // NOTE: Is all this "query blocking" even worth it in order to reduce communication delays?
-                // I think it is since you are not sending all training data to all ranks, only a block of them. Thus you need at some point to reduce the knns
-                // and certainly you want to avoid collecting all data at the root rank and performing the reduction there in a serial fashion.
+		/* (c) Gather the collections of k nearest neighbors sent by the other ranks.
+                 * TODO(?): Make the Recvs async, once you receive a collection (for any query you are in charge of)
+                 *          reduce_in_struct immediately.
+                 * Discussion about callback function on an async request: 
+                 * https://stackoverflow.com/questions/49763675/is-it-possible-to-attach-a-callback-to-be-executed-on-a-request-completion
+                 *
+                 * NOTE: Is all this "query blocking" even worth it in order to reduce communication delays?
+                 * I think it is since you are not sending all training data to all ranks, only a block of them. Thus you need at some point to reduce the knns
+                 * and certainly you want to avoid collecting all data at the root rank and performing the reduction there in a serial fashion.
+		 */ 
 		rcv_buf_offset = 0;
 		for (int j = 0; j < nprocs; j++)
 		{
@@ -217,13 +218,14 @@ int main(int argc, char *argv[])
 	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
 	int local_idx = 0;
 #else
-        // Only care about current err and yp, since err will be accumulated in err_sum I will not need a helper variable.
-        // On the other hand yp will be used to calculate the err and sse and thus in next iteration may be overwritten.
+        /* We only care about current err and yp. err will be accumulated in err_sum, thus we do not need a helper variable.
+         * On the other hand yp will be used to calculate the err and sse and thus in next iteration may be overwritten.
+	 */
 	double yp;
 #endif
-
-        // Calculate yp and the errors/metrics for all queries under the rank's responsibility
-        // Should preserve the values in DEBUG mode.
+        /* Calculate yp and the errors/metrics for all queries under the rank's responsibility
+         * Should preserve the values in DEBUG mode.
+	 */
 	for (int i = first_query; i <= last_query; i++)
 	{
 		t0 = gettime();
@@ -238,8 +240,7 @@ int main(int argc, char *argv[])
 #if defined(DEBUG)
 		sse += (query_ydata[i] - yp[local_idx]) * (query_ydata[i] - yp[local_idx]);
 		err[local_idx] = 100.0 * fabs((yp[local_idx] - query_ydata[i]) / query_ydata[i]);
-		err_sum += err[local_idx];		
-		local_idx++;
+		err_sum += err[local_idx++];		
 #else
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err_sum += 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
@@ -251,33 +252,33 @@ int main(int argc, char *argv[])
 	int curr_char_offset = 0, global_char_offset = 0;
 
         const int max_len = 30;
-        char buf[max_len*(last_query - first_query + 1)];
-        
-        // Collect all local data you want to write to the file into a char buffer
+	char buf[max_len * (last_query - first_query + 1)];
+
+	// Collect all local data you want to write to the file into a char buffer
         for (int i = first_query; i <= last_query; i++)
         {
-                local_idx = i - first_query;
+                local_idx = i - first_query; // "convert" global query index to buf-bound local index
                 snprintf(buf + curr_char_offset, max_len, "%.5f %.5f %.2f\n", query_ydata[i], yp[local_idx], err[local_idx]);
                 curr_char_offset = strlen(buf);
         }
 
-        // At this point each rank has determined the amount of bytes it needs to write in the output file.
-        // Since each rank is in charge of a set of queries in a blocking fashion 
-        // (i.e. rank 0 is in charge of queries [0, queryelems_blocksize), rank 1 -> [queryelems_blocksize, 2*queryelems_blocksize - 1], ...).
-        // We may Exscan those offsets in order for each rank to get it's global offset (in number of chars), in the shared file.
+        /* At this point each rank has determined the amount of bytes it needs to write in the output file (last value of curr_char_offset)
+         * Since each rank is in charge of a set of queries in a blocking fashion 
+         * (i.e. rank 0 is in charge of queries [0, queryelems_blocksize), rank 1 -> [queryelems_blocksize, 2*queryelems_blocksize - 1), ...).
+         * We may Exscan those offsets in order for each rank to get it's global offset (in number of chars), in the shared file.
+	 */
         MPI_Exscan(&curr_char_offset, &global_char_offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
         
-        // Write data to the output file, using those offsets
+        // Collectively write data to the output file, using the rank-specific offsets 
         MPI_File_write_at_all(f, base + global_char_offset, buf, strlen(buf), MPI_CHAR, MPI_STATUS_IGNORE);
 #endif
         
 	/* CALCULATE AND DISPLAY RESULTS */
 
 	// Reduce all metrics to the root rank
-        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD); // set max time as total time
         MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &err_sum, &err_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &sse, &sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-	
 
         if(rank == 0)
         {
@@ -312,7 +313,7 @@ int main(int argc, char *argv[])
 	free(query_mem);
 	free(queries);
 	
-	free(ydata); // new
+	free(ydata); 
 	free(rcv_buf);
 
 	MPI_Finalize();
