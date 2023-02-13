@@ -11,7 +11,7 @@
 
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
-static double *ydata; // this must be changed
+static double *ydata;
 
 // double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
@@ -140,7 +140,7 @@ int main(int argc, char *argv[])
 	// assert(local_ntrainelems % train_block_size == 0);
 
 	/* COMPUTATION PART */
-	double t0, t1, t_sum = 0.0;
+	double t0, t1, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
 	double err_sum = 0.0;
 
@@ -283,6 +283,8 @@ int main(int argc, char *argv[])
 #endif
 		t1 = gettime();
 		t_sum += t1 - t0;
+		if(i == first_query)
+			t_first += t1 - t0;
 
 #if defined(DEBUG)
 		sse += (query_ydata[i] - yp[local_idx]) * (query_ydata[i] - yp[local_idx]);
@@ -340,8 +342,10 @@ int main(int argc, char *argv[])
 
 	// Reduce all metrics to the root rank (i.e. rank 0)
         MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD); // set max time as total time
-        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &err_sum, &err_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &sse, &sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_first, &t_first, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); // sum time for first queries
+	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &err_sum, &err_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &sse, &sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
 
         if(rank == 0) // only rank 0 prints
         {
@@ -356,8 +360,12 @@ int main(int argc, char *argv[])
                 printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
                 printf("Total time = %lf secs\n", t_sum);
-                // TODO: Print average time of first query per block
-                printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
+                
+		// TODO: Print average time of first query per block
+		// OR maybe we should print the time for the "longest" first query, i.e. MPI_MAX reduction on t_first instead of MPI_SUM
+		printf("Average time for 1st query = %lf secs\n", t_first / nprocs);
+		printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
+		printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
         }
 
 	/* CLEANUP */
