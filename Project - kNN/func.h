@@ -68,6 +68,9 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 
 			for (int j = 0; j < NNBS; j++)
 				queries[i].nn_dist[j] = 1e99 - j;
+
+			for (int j = 0; j < NNBS; j++)
+				queries[i].nn_val[j] = -1;
 		}
 	}
 }

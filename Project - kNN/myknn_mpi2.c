@@ -8,7 +8,7 @@
 #ifndef PROBDIM
 #define PROBDIM 2
 #endif
-#define DEBUG 1
+
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double *ydata; // this must be changed
@@ -27,10 +27,10 @@ double find_knn_value(query_t *q, int knn)
 	for (int i = 0; i < knn; i++)
 		fd[i] = q->nn_val[i];
 		// fd[i] = ydata[q->nn_idx[i]];
-
-/* 	for (int i = 0; i < knn; i++) 
-		for (int j = 0; j < PROBDIM; j++)
-			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j]; */
+// TODO: Remove xd, since it is not used in predict value
+//      for (int i = 0; i < knn; i++)
+// 		for (int j = 0; j < PROBDIM; j++)
+// 			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
 
 	return predict_value(PROBDIM, knn, xd, fd);
 }
@@ -68,12 +68,10 @@ int main(int argc, char *argv[])
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t)); 
 
         // read a part of training data
-        // load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
+        load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
 
         // read all of the query data
         load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);
-	// load_binary_data(queryfile, query_mem, queries, QUERYELEMS * vector_size);
-
 
 	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
@@ -120,22 +118,6 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-	if(rank == 0)
-	{
-		for (int i = 0; i < QUERYELEMS; i++)
-			printf("Rank 0, query_ydata[%d] = %.5f\n", i, query_mem[i * vector_size + PROBDIM-4]);
-	}
-	MPI_Finalize();
-	return 0;
-
-	double *yp_vals_buf = NULL, *err_vals_buf = NULL;
-	// buffers to receive calculated values and resulting errors
-	if(rank == 0)
-	{
-		yp_vals_buf = (double*)malloc(QUERYELEMS * sizeof(double));
-		err_vals_buf = (double*)malloc(QUERYELEMS * sizeof(double));
-	}
-
 	// assert(TRAINELEMS % train_block_size == 0);
 	// assert(TRAINELEMS % local_ntrainelems == 0);
 
@@ -155,11 +137,6 @@ int main(int argc, char *argv[])
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
 	
-#if defined(DEBUG)
-	/* Create/Open an output file */
-	// FILE *fpout = fopen("output.knn_mpi.txt","w");
-	char *filename = "output.knn_mpi.txt";
-#endif
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
@@ -205,103 +182,108 @@ int main(int argc, char *argv[])
 		}
 
 		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
-		reduce_in_struct(&(queries[i]), rcv_buf, nprocs);	
+		reduce_in_struct(&(queries[i]), rcv_buf, nprocs-1);	
 	}
 	t1 = gettime();
 	t_sum = t1 - t0;
-
-// TODO :
-// actually not all of the query_ydata is needed since it is only used to calculate error metrics,
-// from results that concern the queries under the control of the current rank.
+        
+        // Initialize environment for metric calculations
 #if defined(DEBUG)
+        // Preserve yp, err for each query, so you may later write the output file
+        char *filename = "output.knn_mpi.txt";
+
+        // Open and initialize the ouput file for all ranks
+        MPI_File f;
+        MPI_Offset base;
+        MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
+        MPI_File_get_position(f, &base);
+
 	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
-	int idx = 0;
+	int local_idx = 0;
 #else
+        // Only care about current err and yp, since err will be accumulated in err_sum, and yp will be used to calculate the err
+        // and sse and thus in next iteration may be overwritten
 	double yp, err;
 #endif
-	for (int i = first_query; i <= last_query; i++) // run for all queries under the rank's responsibility
+
+        // Calculate yp and the errors/metrics for all queries under the rank's responsibility
+        // Should preserve the values in DEBUG mode.
+	for (int i = first_query; i <= last_query; i++)
 	{
 		t0 = gettime();
-	#if defined(DEBUG)
-		yp[idx] = find_knn_value(&(queries[i]), NNBS);
-	#else
+#if defined(DEBUG)
+		yp[local_idx] = find_knn_value(&(queries[i]), NNBS);
+#else
 		yp = find_knn_value(&(queries[i]), NNBS);
-	#endif
+#endif
 		t1 = gettime();
 		t_sum += t1 - t0;
 
-	#if defined(DEBUG)
-		sse += (query_ydata[i] - yp[idx]) * (query_ydata[i] - yp[idx]);
-		err[idx] = 100.0 * fabs((yp[idx] - query_ydata[i]) / query_ydata[i]);
-		err_sum += err[idx];		
-
-		if(rank == 0)
-			printf("rank 0, yp[%d] = %.5f\terr[%d] = %.5f\tquery_ydata[%d] = %.5f\n", idx, yp[idx], idx, err[idx], idx, query_ydata[idx]);
-
-		idx++;
-	#else
+#if defined(DEBUG)
+		sse += (query_ydata[i] - yp[local_idx]) * (query_ydata[i] - yp[local_idx]);
+		err[local_idx] = 100.0 * fabs((yp[local_idx] - query_ydata[i]) / query_ydata[i]);
+		err_sum += err[local_idx];		
+		local_idx++;
+#else
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
-	#endif
+#endif
 	}
 
 #if defined(DEBUG)
-	MPI_Barrier(MPI_COMM_WORLD);
+        // Write the output file
+	int curr_char_offset = 0, global_char_offset = 0;
 
-	MPI_Gather(yp, last_query - first_query + 1, MPI_DOUBLE, yp_vals_buf, QUERYELEMS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-	
-	MPI_Gather(err, last_query - first_query + 1, MPI_DOUBLE, err_vals_buf, QUERYELEMS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-#endif
-
-	MPI_Barrier(MPI_COMM_WORLD); // wait for all ranks to finish their computations
-
-	if(rank == 0)
-	{
-		FILE *fout = fopen(filename, "w");
-
-		for (int i = 0; i < QUERYELEMS; i++)
-			fprintf(fout, "yp_vals_buf[%d] = %.5f\n", i, yp_vals_buf[i]);
-		// fprintf(fout, "%.5f %.5f %.2f\n", query_ydata[i], yp_vals_buf[i], err_vals_buf[i]);
-
-		fclose(fout);
-	}
-
-	MPI_Finalize();
-	return 0;
-
+        const int max_len = 30;
+        char buf[max_len*(last_query - first_query + 1)];
         
-	// get max time -> total execution time
-	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        // Collect all local data you want to write to the file into a char buffer
+        for (int i = first_query; i <= last_query; i++)
+        {
+                local_idx = i - first_query;
+                snprintf(buf + curr_char_offset, max_len, "%.5f %.5f %.2f\n", query_ydata[i], yp[local_idx], err[local_idx]);
+                curr_char_offset = strlen(buf);
+        }
 
-#if defined(DEBUG)
-	// how are we going to replicate the write "%.5f %.5f %.2f\n", query_ydata[i], yp, err) ??
-	//store_binary_data_mpi(filename, ...)
+        // At this point each rank has determined the amount of bytes it needs to write in the output file.
+        // Since each rank is in charge of a set of queries in a blocking fashion 
+        // (i.e. rank 0 is in charge of queries [0, queryelems_blocksize), rank 1 -> [queryelems_blocksize, 2*queryelems_blocksize - 1], ...).
+        // We may Exscan those offsets in order for each rank to get it's global offset (in number of chars), in the shared file.
+        MPI_Exscan(&curr_char_offset, &global_char_offset, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+        
+        // Write data to the output file, using those offsets
+        MPI_File_write_at_all(f, base + global_char_offset, buf, strlen(buf), MPI_CHAR, MPI_STATUS_IGNORE);
 #endif
-
+        
 	/* CALCULATE AND DISPLAY RESULTS */
 
-	double mse = sse / QUERYELEMS;
-	double ymean = compute_mean(query_ydata, QUERYELEMS);
-	double var = compute_var(query_ydata, QUERYELEMS, ymean);
-	double r2 = 1 - (mse / var);
+	// Reduce all metrics to the root rank
+        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &t_sum, &t_sum, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &err_sum, &err_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &sse, &sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	
 
-	printf("Results for %d query points\n", QUERYELEMS);
-	printf("APE = %.2f %%\n", err_sum / QUERYELEMS);
-	printf("MSE = %.6f\n", mse);
-	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
+        if(rank == 0)
+        {
+                double mse = sse / QUERYELEMS;
+                double ymean = compute_mean(query_ydata, QUERYELEMS);
+                double var = compute_var(query_ydata, QUERYELEMS, ymean);
+                double r2 = 1 - (mse / var);
 
-	printf("Total time = %lf secs\n", t_sum);
-	printf("Time for 1st query = %lf secs\n", t_first);
-	printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
-	printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
+                printf("Results for %d query points\n", QUERYELEMS);
+                printf("APE = %.2f %%\n", err_sum / QUERYELEMS);
+                printf("MSE = %.6f\n", mse);
+                printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
+
+                printf("Total time = %lf secs\n", t_sum);
+                // TODO: Print average time of first query per block
+                printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
+        }
 
 	/* CLEANUP */
 
 #if defined(DEBUG)
-	/* Close the output file */
-	// fclose(fpout);
-
-	// MPI_File_close(&f);
+	MPI_File_close(&f);
 #endif
 
 #if defined(SIMD)

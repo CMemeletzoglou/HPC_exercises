@@ -38,6 +38,9 @@ void load_binary_data_mpi(const char *filename, double *data, query_t *queries, 
 
 			for (int j = 0; j < NNBS; j++)
 				queries[i].nn_dist[j] = 1e99 - j;
+
+			for (int j = 0; j < NNBS; j++)
+				queries[i].nn_val[j] = -1;
 		}
 	}
 
@@ -96,6 +99,8 @@ int get_max_dist_neighbor(double *nn_dist, int k)
 void reduce_in_struct(query_t *query, query_t *received, int received_size)
 {
 	int max_idx;
+	int rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	for (int i = 0; i < received_size; i++)
 	{
@@ -107,6 +112,7 @@ void reduce_in_struct(query_t *query, query_t *received, int received_size)
 			{
 				query->nn_dist[max_idx] = received[i].nn_dist[j];
 				query->nn_idx[max_idx] = received[i].nn_idx[j];
+				query->nn_val[max_idx] = received[i].nn_val[j];
 				max_idx = get_max_dist_neighbor(query->nn_dist, NNBS);
 			}
 		}
