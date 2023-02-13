@@ -10,7 +10,7 @@ CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE)
 CFLAGS += -DSURROGATES -Wall
 LDFLAGS += -lm 
 
-all: gendata myknn myknn_omp myknn_mpi
+all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -18,30 +18,52 @@ gendata: gendata.o
 gendata.o: gendata.c 
 	gcc $(CFLAGS) -ggdb -c gendata.c
 
+######################################################
+#-------------------- SERIAL -------------------------
 myknn: myknn.o
 	gcc -o myknn myknn.o $(LDFLAGS)
 
 myknn.o: myknn.c
 	gcc $(CFLAGS) -ggdb -c myknn.c
 
+#-------------------- SERIAL + SIMD ------------------
 myknn_simd: myknn_simd.o
 	gcc -o myknn_simd myknn_simd.o $(LDFLAGS)
 
 myknn_simd.o: myknn.c
-	gcc -DSIMD $(CFLAGS) -mavx -ggdb -c -o myknn_simd.o myknn.c
+	gcc -DSIMD -mavx $(CFLAGS) -ggdb -c -o myknn_simd.o myknn.c
+######################################################
 
+#-------------------- OpenMP -------------------------
 myknn_omp: myknn_omp.o
 	gcc -o myknn_omp myknn_omp.o $(LDFLAGS) -fopenmp
 
 myknn_omp.o: myknn_omp.c
-	gcc $(CFLAGS) -ggdb -fopenmp -mavx -c myknn_omp.c
+	gcc $(CFLAGS) -ggdb -fopenmp -c myknn_omp.c
 
+#-------------------- OpenMP + SIMD ------------------
+myknn_omp_simd: myknn_omp_simd.o
+	gcc -o myknn_omp_simd myknn_omp_simd.o $(LDFLAGS) -fopenmp
+
+myknn_omp_simd.o: myknn_omp.c
+	gcc -DSIMD -mavx $(CFLAGS) -ggdb -fopenmp -o myknn_omp_simd.o -c myknn_omp.c
+######################################################
+
+#-------------------- MPI ----------------------------
 myknn_mpi: myknn_mpi.o
 	mpicc -o myknn_mpi myknn_mpi.o $(LDFLAGS)
 
 myknn_mpi.o: myknn_mpi.c
-	mpicc -DMPI -DSIMD $(CFLAGS) -mavx -c myknn_mpi.c
+	mpicc -DMPI $(CFLAGS) -c myknn_mpi.c
 
+#-------------------- MPI + SIMD ---------------------
+myknn_mpi_simd: myknn_mpi_simd.o
+	mpicc -o myknn_mpi_simd myknn_mpi_simd.o $(LDFLAGS)
+
+myknn_mpi_simd.o: myknn_mpi.c
+	mpicc -DMPI -DSIMD -mavx $(CFLAGS) -o myknn_mpi_simd.o -c myknn_mpi.c
+######################################################
+	
 
 clean:
-	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_mpi
+	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd

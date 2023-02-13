@@ -203,7 +203,7 @@ int main(int argc, char *argv[])
 	free(query_mem);
 
 #if defined(SIMD)
-	for (int i = 0; i < local_ntrainelems; i++)
+	for (int i = 0; i < TRAINELEMS; i++)
 		free(xdata[i]);
 #endif
 	free(xdata);
