@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
 	// assert(TRAINELEMS % local_ntrainelems == 0);
 
 	/* COMPUTATION PART */
-	double t0, t1, t_first = 0.0, t_sum = 0.0;
+	double t0, t1, t_sum = 0.0;
 	double sse = 0.0;
 	double err_sum = 0.0;
 
@@ -201,9 +201,9 @@ int main(int argc, char *argv[])
 	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
 	int local_idx = 0;
 #else
-        // Only care about current err and yp, since err will be accumulated in err_sum, and yp will be used to calculate the err
-        // and sse and thus in next iteration may be overwritten
-	double yp, err;
+        // Only care about current err and yp, since err will be accumulated in err_sum I will not need a helper variable.
+        // On the other hand yp will be used to calculate the err and sse and thus in next iteration may be overwritten.
+	double yp;
 #endif
 
         // Calculate yp and the errors/metrics for all queries under the rank's responsibility
@@ -226,7 +226,7 @@ int main(int argc, char *argv[])
 		local_idx++;
 #else
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
-		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
+		err_sum += 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
 #endif
 	}
 
