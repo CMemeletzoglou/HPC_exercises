@@ -132,8 +132,11 @@ int main(int argc, char *argv[])
 	double err_sum = 0.0;
 
 	int queryelems_blocksize = QUERYELEMS / nprocs;
-	int rank_in_charge;
-	MPI_Request request = MPI_REQUEST_NULL;
+	int rank_in_charge, pack_pos = 0;
+	// MPI_Request request = MPI_REQUEST_NULL;
+	
+	// we actually need an MPI_Request object per asynchronous communication call
+	MPI_Request request[nprocs - 1];
 	MPI_Status status;
 
 	int first_query = rank * queryelems_blocksize;
@@ -141,7 +144,23 @@ int main(int argc, char *argv[])
 
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
+
+	// Calculate the necessary sizes in order to allocate a temp buffer for use with MPI_Pack
+	int size_int_arr, size_double_arr;
+	MPI_Pack_size(NNBS, MPI_INT, MPI_COMM_WORLD, &size_int_arr);
+	MPI_Pack_size(NNBS, MPI_DOUBLE, MPI_COMM_WORLD, &size_double_arr);
 	
+	/* Each query_t object contains: 
+	 * - a pointer to a double vector of size PROBDIM (we don't need to send this vector, 
+	 *   so don't account its size)
+	 * - an integer array of size NNBS -> size_int_arr
+	 * - two double arrays of size NNBS -> 2 * size_double_arr .
+	 * Therefore, the total buffer size is equal to :
+	 */
+	int pack_buf_size = size_int_arr + 2 * size_double_arr;
+
+	// Buffer for the MPI "packets"
+	char *pack_buf = (char *)malloc(pack_buf_size * sizeof(char));
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
@@ -159,7 +178,6 @@ int main(int argc, char *argv[])
 	 *    These collections are calculated (step a) and sent (step b) by the other ranks (i.e. from other training elements blocks).
 	 * d) Calculating the final k nearest neighbors, using the collections gathered at step (c). (reduction)
 	 */
-
 	t0 = gettime();
 
 	// (a) and (b) Calculate and send the k neighbors found in the training block for **all** query points.
@@ -170,9 +188,18 @@ int main(int argc, char *argv[])
 		compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
 
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
-                // TODO: Use MPI_Pack to make code portable
+                // We use MPI_Pack to make code portable
 		if (rank_in_charge != rank)
-			MPI_Isend(&(queries[i]), 1 * sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);
+		{
+			pack_pos = 0;
+			MPI_Pack(queries[i].nn_idx, NNBS, MPI_INT, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
+			MPI_Pack(queries[i].nn_dist, NNBS, MPI_DOUBLE, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
+			MPI_Pack(queries[i].nn_val, NNBS, MPI_DOUBLE, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
+			assert(pack_pos <= pack_buf_size);
+			
+			// Send the "packet" message
+			MPI_Isend(pack_buf, pack_buf_size, MPI_PACKED, rank_in_charge, i, MPI_COMM_WORLD, &request[rank_in_charge]);
+		}
 	}
 
 	int rcv_buf_offset = 0;
@@ -193,11 +220,20 @@ int main(int argc, char *argv[])
 		{
 			if (j == rank)
 				continue;
-			MPI_Recv(&(rcv_buf[rcv_buf_offset++]), 1 * sizeof(query_t), MPI_BYTE, j, i, MPI_COMM_WORLD, &status);
-		}
 
+			// Receive the "packet" message
+			MPI_Recv(pack_buf, pack_buf_size, MPI_PACKED, j, i, MPI_COMM_WORLD, &status);
+
+			// Unpack the "packet" message	
+			pack_pos = 0;
+			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_idx, NNBS, MPI_INT, MPI_COMM_WORLD);
+			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_dist, NNBS, MPI_DOUBLE, MPI_COMM_WORLD);
+			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_val, NNBS, MPI_DOUBLE, MPI_COMM_WORLD);
+			rcv_buf_offset++;
+			assert(pack_pos <= pack_buf_size);
+		}
 		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
-		reduce_in_struct(&(queries[i]), rcv_buf, nprocs-1);	
+		reduce_in_struct(&(queries[i]), rcv_buf, nprocs - 1);
 	}
 	t1 = gettime();
 	t_sum = t1 - t0;
@@ -329,6 +365,7 @@ int main(int argc, char *argv[])
 	
 	free(ydata); 
 	free(rcv_buf);
+	free(pack_buf);
 
 	MPI_Finalize();
 	return 0;

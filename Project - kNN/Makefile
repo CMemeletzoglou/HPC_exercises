@@ -40,7 +40,9 @@ myknn_mpi: myknn_mpi.o
 	mpicc -o myknn_mpi myknn_mpi.o $(LDFLAGS)
 
 myknn_mpi.o: myknn_mpi.c
-	mpicc -DMPI -DSIMD $(CFLAGS) -c myknn_mpi.c
+	# mpicc -DMPI -DSIMD $(CFLAGS) -c myknn_mpi.c
+	mpicc -DMPI $(CFLAGS) -c myknn_mpi.c
+	
 
 clean:
 	rm -f myknn *.o gendata myknn_simd myknn_omp myknn_mpi
