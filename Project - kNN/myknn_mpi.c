@@ -45,6 +45,10 @@ int main(int argc, char *argv[])
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
 
+#if defined(SIMD)
+	printf("Running with SIMD\n");
+#endif 
+
         // MPI Init
         int rank, nprocs;
         MPI_Init(&argc, &argv);
@@ -230,7 +234,8 @@ int main(int argc, char *argv[])
 				continue;
 
 			// Receive the "packet" message
-			MPI_Recv(pack_buf, pack_buf_size, MPI_PACKED, j, i, MPI_COMM_WORLD, &status);
+			// MPI_Recv(pack_buf, pack_buf_size, MPI_PACKED, j, i, MPI_COMM_WORLD, &status);
+			MPI_Recv(pack_buf, pack_buf_size, MPI_BYTE, j, i, MPI_COMM_WORLD, &status); // WTF NOW BOTH WORK
 
 			// Unpack the "packet" message	
 			pack_pos = 0;
