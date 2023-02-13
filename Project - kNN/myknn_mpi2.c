@@ -118,8 +118,15 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-	// assert(TRAINELEMS % train_block_size == 0);
-	// assert(TRAINELEMS % local_ntrainelems == 0);
+        /* DECIDE ON SIZE OF IN-RANK BLOCK */
+        // TODO: Think about last rank, which may have more local training elements, the assert may not succeed
+        //       you probably only need to correct the last iteration (?)
+        // int L1d_size, train_block_size = 1;
+	// get_L1d_size(&L1d_size); // get L1d cache size
+	// // calculate the appropriate train block size as the previous power of 2
+	// if(L1d_size > 0)
+	// 	train_block_size = pow(2, floor(log2((L1d_size * 1000) / (PROBDIM * sizeof(double)))));
+	// assert(local_ntrainelems % train_block_size == 0);
 
 	/* COMPUTATION PART */
 	double t0, t1, t_sum = 0.0;
@@ -165,6 +172,7 @@ int main(int argc, char *argv[])
 		compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
 
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
+                // TODO: Use MPI_Pack to make code portable
 		if (rank_in_charge != rank)
 			MPI_Isend(&(queries[i]), 1 * sizeof(query_t), MPI_BYTE, rank_in_charge, i, MPI_COMM_WORLD, &request);
 	}
@@ -173,6 +181,14 @@ int main(int argc, char *argv[])
 	for (int i = first_query; i <= last_query; i++)
 	{
 		// (c) Gather the collections of k nearest neighbors sent by the other ranks.
+                // TODO(?): Make the Recvs async, once you receive a collection (for any query you are in charge of)
+                //          reduce_in_struct immediately.
+                // Discussion about callback function on an async request: 
+                // https://stackoverflow.com/questions/49763675/is-it-possible-to-attach-a-callback-to-be-executed-on-a-request-completion
+                //
+                // NOTE: Is all this "query blocking" even worth it in order to reduce communication delays?
+                // I think it is since you are not sending all training data to all ranks, only a block of them. Thus you need at some point to reduce the knns
+                // and certainly you want to avoid collecting all data at the root rank and performing the reduction there in a serial fashion.
 		rcv_buf_offset = 0;
 		for (int j = 0; j < nprocs; j++)
 		{
