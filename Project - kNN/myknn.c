@@ -129,13 +129,19 @@ int main(int argc, char *argv[])
 	 * using the training elements, that belong to the current training element block.
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 */
-	t0 = gettime();
 	for (int train_offset = 0; train_offset < TRAINELEMS; train_offset += train_block_size)
+	{
+		t0 = gettime();
 		for (int i = 0; i < QUERYELEMS; i++)
+		{
 			compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, train_offset, 0, train_block_size);
+			if (i == 0)
+				t_first += gettime() - t0;
+		}
+		t1 = gettime();
+		t_sum += t1 - t0;
+	}
 
-	t1 = gettime();
-	t_sum = t1 - t0;
 
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
@@ -143,6 +149,8 @@ int main(int argc, char *argv[])
 		double yp = find_knn_value(&(queries[i]), NNBS);
 		t1 = gettime();
 		t_sum += t1 - t0;
+		if (i == 0)
+			t_first += t1 - t0;
 		
 		sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
 		err = 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
