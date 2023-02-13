@@ -1,8 +1,10 @@
 #pragma once
 
-#include <emmintrin.h>
-#include <immintrin.h>
-#include <x86intrin.h>
+#if defined(SIMD)
+	#include <emmintrin.h>
+	#include <immintrin.h>
+	#include <x86intrin.h>
+#endif
 #include <sys/time.h>
 #include <stdio.h>
 #include <math.h>
