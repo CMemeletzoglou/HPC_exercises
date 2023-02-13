@@ -65,13 +65,17 @@ int main(int argc, char *argv[])
 	ydata = (double *)malloc(local_ntrainelems * sizeof(double));
 	double *query_ydata = malloc(QUERYELEMS * sizeof(double));
 	double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
-	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t)); 
+	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));
 
-        // read a part of training data
-        load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
-
-        // read all of the query data
-        load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);        
+#if defined(SIMD)
+	int posix_res;
+        // Malloc aligned space for query.x data 
+        for (int i = 0; i < QUERYELEMS; i++)
+        {
+                posix_res = posix_memalign((void **)(&(queries[i].x)), 32, PROBDIM * sizeof(double));
+                assert(posix_res == 0);
+        }
+#endif
 
 	/* Create a handler array that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
@@ -80,9 +84,14 @@ int main(int argc, char *argv[])
 	 * or use ydata (surrogates) (ex. when predicting the value of a query point)
 	 */
 	xdata = (double **)malloc(local_ntrainelems * sizeof(double*));
+        
+        // read a part of training data
+        load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
+
+        // read all of the query data
+        load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);        
 
 #if defined(SIMD)
-	int posix_res;
 	// Allocate new memory for the handler arrays, so that it is aligned and copy the data there
 	// Align each xdata[i] to a 32 byte boundary so you may later use SIMD
 	for (int i = 0; i < local_ntrainelems; i++)
@@ -133,7 +142,6 @@ int main(int argc, char *argv[])
 
 	int queryelems_blocksize = QUERYELEMS / nprocs;
 	int rank_in_charge, pack_pos = 0;
-	// MPI_Request request = MPI_REQUEST_NULL;
 	
 	// we actually need an MPI_Request object per asynchronous communication call
 	MPI_Request request[nprocs - 1];
@@ -354,16 +362,21 @@ int main(int argc, char *argv[])
 #endif
 
 #if defined(SIMD)
+	for (int i = 0; i < QUERYELEMS; i++)
+		free(queries[i].x);
+#endif
+	free(queries);
+	free(query_ydata);
+	free(query_mem);
+
+#if defined(SIMD)
 	for (int i = 0; i < local_ntrainelems; i++)
 		free(xdata[i]);
 #endif
 	free(xdata);
+	free(ydata);
 	free(mem);
-	free(query_ydata);
-	free(query_mem);
-	free(queries);
-	
-	free(ydata); 
+
 	free(rcv_buf);
 	free(pack_buf);
 

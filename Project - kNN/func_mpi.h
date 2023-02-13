@@ -24,15 +24,15 @@ void load_binary_data_mpi(const char *filename, double *data, query_t *queries, 
         // If queries are loaded, initialize the queries structs
 	if (queries != NULL)
 	{
-		size_t posix_res;
 		for (int i = 0; i < QUERYELEMS; i++)
 		{
-			posix_res = posix_memalign((void **)(&(queries[i].x)), 32, PROBDIM * sizeof(double));
-			assert(posix_res == 0);
-
 			for (int k = 0; k < PROBDIM; k++)
+		#if defined(SIMD)
 				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
-
+		#else
+				queries[i].x = &data[i * (PROBDIM + 1)];
+		#endif
+		
 			for (int j = 0; j < NNBS; j++)
 				queries[i].nn_idx[j] = -1;
 

@@ -19,7 +19,7 @@
 
 // TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
-static double ydata[TRAINELEMS];
+static double *ydata;
 
 // double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
@@ -61,8 +61,19 @@ int main(int argc, char *argv[])
 	char *queryfile = argv[2];
 
 	double *mem = (double *)malloc(TRAINELEMS * (PROBDIM + 1) * sizeof(double));
-	double *query_mem = (double *)malloc(QUERYELEMS * (PROBDIM + 1) * sizeof(double));	
+	ydata = (double *)malloc(TRAINELEMS * sizeof(double));
+	double *query_mem = (double *)malloc(QUERYELEMS * (PROBDIM + 1) * sizeof(double));
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));
+
+#if defined(SIMD)
+	int posix_res;
+        // Malloc aligned space for query.x data 
+        for (int i = 0; i < QUERYELEMS; i++)
+        {
+                posix_res = posix_memalign((void **)(&(queries[i].x)), 32, PROBDIM * sizeof(double));
+                assert(posix_res == 0);
+        }
+#endif
 
 	load_binary_data(trainfile, mem, NULL, TRAINELEMS*(PROBDIM+1));
 	load_binary_data(queryfile, query_mem, queries, QUERYELEMS * (PROBDIM + 1));
@@ -81,7 +92,6 @@ int main(int argc, char *argv[])
 	xdata = (double **)malloc(TRAINELEMS * sizeof(double *));
 
 #if defined(SIMD)
-	int posix_res;
 	// Allocate new memory for the handler arrays, so that it is aligned and copy the data there
 	// Align each xdata[i] to a 32 byte boundary so you may later use SIMD
 	for (int i = 0; i < TRAINELEMS; i++)
@@ -185,14 +195,20 @@ int main(int argc, char *argv[])
 #endif
 
 #if defined(SIMD)
-	for (int i = 0; i < TRAINELEMS; i++)
+	for (int i = 0; i < QUERYELEMS; i++)
+		free(queries[i].x);
+#endif
+	free(queries);
+	free(query_ydata);
+	free(query_mem);
+
+#if defined(SIMD)
+	for (int i = 0; i < local_ntrainelems; i++)
 		free(xdata[i]);
 #endif
 	free(xdata);
+	free(ydata);
 	free(mem);
-	free(query_ydata);
-	free(query_mem);
-	free(queries);
 
 	return 0;
 }
