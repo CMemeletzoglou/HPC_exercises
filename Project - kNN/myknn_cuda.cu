@@ -8,27 +8,20 @@
 #define PROBDIM 2
 #endif
 
-// TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
-static double **xdata;
-static double *ydata;
-
-__device__ double find_knn_value(query_t *q, int knn, double *dev_fd)
+__device__ double find_knn_value(double *dev_mem, double *dev_ydata, query_t *q, int *knn)
 {
 	// double fd[knn];	      	      // function values for the knn neighbors
 
-	compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force / linear search
+	// compute_knn_brute_force(xdata, p, TRAINELEMS, PROBDIM, knn, nn_x, nn_d); // brute-force / linear search
 
+	// for (int i = 0; i < knn; i++)
+	// 	fd[i] = ydata[nn_x[i]];
 
-	for (int i = 0; i < knn; i++)
-		fd[i] = ydata[nn_x[i]];
+	double sum_v = 0.0;
+	for (int i = 0; i < *knn; i++)
+		sum_v += dev_ydata[i];
 
-	// for (int i = 0; i < knn; i++) 
-	// 	for (int j = 0; j < PROBDIM; j++)
-	// 		xd[i * PROBDIM + j] = xdata[nn_x[i]][j];
-
-        // dump predict_value code here ?
-
-	return predict_value(PROBDIM, knn, xd, fd, p, nn_d);
+	return sum_v / *knn;
 }
 
 __global__ void knn_kernel(double *dev_queries)
@@ -40,11 +33,11 @@ __global__ void knn_kernel(double *dev_queries)
         for (int i = 0; i < QUERYELEMS; i++)
 	{	/* requests */
 		// t0 = gettime();
-		double yp = find_knn_value(&dev_queries[i], NNBS);
+		// double yp = find_knn_value(&dev_queries[i], NNBS);
 		// t1 = gettime();
-		t_sum += (t1-t0); // don't care will count at host side
-		if (i == 0)
-			t_first = (t1-t0);
+		// t_sum += (t1-t0); // don't care will count at host side
+		// if (i == 0)
+		// 	t_first = (t1-t0);
 
 		// sse += (y[i] - yp) * (y[i] - yp);
 
@@ -58,37 +51,9 @@ __global__ void knn_kernel(double *dev_queries)
 #if DEBUG
 		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
 #endif
-		err_sum += err;
+		// err_sum += err;
 	}
 
-}
-
-// move this init to CPU
-__global__ void init_gpu_data(double *dev_mem, double *dev_query_mem, double **dev_xdata, double *dev_ydata, double *dev_query_ydata)
-{
-        // Assign to the handler arrays, pointers to the already allocated mem
-        for(int i=0; i<TRAINELEMS; i++)
-                dev_xdata[i] = &dev_mem[i*(PROBDIM+1)];
-                // cudaMemcpy(dev_mem[i*vector_size], dev_xdata[i], vector_size * sizeof(double), cudaMemcpyDeviceToDevice);
-
-        /* Configure and Initialize the ydata handler arrays */
-	for (int i = 0; i < TRAINELEMS; i++)
-	{
-#if defined(SURROGATES)
-		dev_ydata[i] = dev_mem[i * (PROBDIM+1) + PROBDIM];
-#else
-		dev_ydata[i] = 0;
-#endif
-	}
-
-	for (int i = 0; i < QUERYELEMS; i++)
-	{
-#if defined(SURROGATES)
-		dev_query_ydata[i] = dev_query_mem[i * (PROBDIM+1) + PROBDIM];
-#else
-		dev_query_ydata[i] = 0;
-#endif
-	}
 }
 
 int main(int argc, char *argv[])
@@ -107,48 +72,83 @@ int main(int argc, char *argv[])
         FILE *fpout = fopen("output.knn.txt","w");
 #endif
         int vector_size = PROBDIM + 1;
-        double *dev_mem, *dev_query_mem, **dev_xdata, *dev_ydata, *dev_query_ydata, *dev_fd;
+        double *dev_mem, *dev_query_mem, *dev_ydata, *dev_query_ydata, *dev_fd;
         query_t *dev_queries;
-
+	
+	// ******************************************************************
+	// ************************** Host mallocs **************************
+	// ******************************************************************
 	double *mem = (double *)malloc(TRAINELEMS * vector_size * sizeof(double));
-	// ydata = (double *)malloc(TRAINELEMS * sizeof(double));
+	double *ydata = (double *)malloc(TRAINELEMS * sizeof(double));
 	double *query_mem = (double *)malloc(QUERYELEMS * vector_size * sizeof(double));
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));
+	double *query_ydata = (double*)malloc(QUERYELEMS * sizeof(double));
 
-        // allocate global memory on the device for the training element and query vectors
-        cudaMalloc((void**)&dev_mem, TRAINELEMS * vector_size * sizeof(double));
-        cudaMalloc((void**)&dev_query_mem, QUERYELEMS * vector_size * sizeof(double));
-        cudaMalloc((void**)&dev_queries, QUERYELEMS * sizeof(query_t));
+	// ******************************************************************
+	// ************************** Load Data *****************************
+	// ******************************************************************
+	load_binary_data(trainfile, mem, NULL, TRAINELEMS * (PROBDIM + 1));
+	load_binary_data(queryfile, query_mem, queries, QUERYELEMS * vector_size);
 
+	// ******************************************************************
+	// ************************** Device mallocs ************************
+	// ******************************************************************
 	/* Create handler arrays that will be used to separate xdata's PROBDIM vectors
 	 * and the corresponding surrogate values, since we never need both
 	 * in order to perform a computation.
 	 * We either going to use the xdata of two points (ex. when calculating distance from one another)
 	 * or use ydata (surrogates) (ex. when predicting the value of a query point)
 	 */
-        cudaMalloc((void**)&dev_xdata, TRAINELEMS * sizeof(double*));
+	// allocate global memory on the device for the training element and query vectors
+        cudaMalloc((void**)&dev_mem, TRAINELEMS * vector_size * sizeof(double));
         cudaMalloc((void**)&dev_ydata, TRAINELEMS * sizeof(double));
+        cudaMalloc((void**)&dev_query_mem, QUERYELEMS * vector_size * sizeof(double));
+        cudaMalloc((void**)&dev_queries, QUERYELEMS * sizeof(query_t));
         cudaMalloc((void**)&dev_query_ydata, QUERYELEMS * sizeof(double));
 
-        cudaMalloc((void**)&dev_fd, NNBS * sizeof(double));
-
-	load_binary_data(trainfile, mem, NULL, TRAINELEMS*(PROBDIM+1));
-	load_binary_data(queryfile, query_mem, queries, QUERYELEMS * vector_size);
-
-        // for each pointer-element of xdata, cudaMalloc space then cudaMemcpy the CPU xdata vectors, etc..
-
-        // copy data from host to device
-        cudaMemcpy(mem, dev_mem, TRAINELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(query_mem, dev_query_mem, QUERYELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(queries, dev_queries, QUERYELEMS * sizeof(query_t), cudaMemcpyHostToDevice);
-
-        // double *query_ydata;
+	// ******************************************************************
+	// ************************** Host data init ************************
+	// ******************************************************************
 
         // init all data on CPU **Then** send them to GPU
+	for (int i = 0; i < TRAINELEMS; i++)
+	{
+#if defined(SURROGATES)
+		ydata[i] = mem[i * (PROBDIM + 1) + PROBDIM];
+#else
+		ydata[i] = 0;
+#endif
+	}
 
-        init_gpu_data<<<1, 256>>>(dev_mem, dev_query_mem, dev_xdata, dev_ydata, dev_query_ydata); // useless
+	for (int i = 0; i < QUERYELEMS; i++)
+	{
+#if defined(SURROGATES)
+		query_ydata[i] = query_mem[i * (PROBDIM + 1) + PROBDIM];
+#else
+		query_ydata[i] = 0;
+#endif
+	}
 
-        cudaDeviceSynchronize();
+	// ******************************************************************
+	// ************************** Copyout data to device ****************
+	// ******************************************************************	
+	cudaMemcpy(mem, dev_mem, TRAINELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(query_mem, dev_query_mem, QUERYELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(queries, dev_queries, QUERYELEMS * sizeof(query_t), cudaMemcpyHostToDevice);
+	
+	printf("here1\n");
+	// what to do here with the query_t.x internal pointers?
+	for (int i = 0; i < QUERYELEMS; i++)
+	{
+		cudaMalloc((void **)&(dev_queries[i].x), PROBDIM * sizeof(double));
+		// cudaMemcpy(dev_queries[i].x, queries[i].x, PROBDIM * sizeof(double), cudaMemcpyHostToDevice);
+	}
+	printf("here2\n");
+
+	cudaMemcpy(dev_ydata, ydata, TRAINELEMS * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_query_ydata, query_ydata, QUERYELEMS * sizeof(double), cudaMemcpyHostToDevice);
+
+
 	/* COMPUTATION PART */
         double t_start = gettime();
 
@@ -184,17 +184,15 @@ int main(int argc, char *argv[])
 
 	free(queries);
 	free(query_mem);
-	// free(query_ydata);
+	free(query_ydata);
 
-	// free(xdata);
-	// free(ydata);
+	free(ydata);
 	free(mem);
 
         cudaFree(dev_mem);
         cudaFree(dev_query_mem);
         cudaFree(dev_queries);
-        cudaFree(dev_xdata);
-        cudaFree(dev_ydata);
+	cudaFree(dev_ydata);
         cudaFree(dev_query_ydata);
 
 	return 0;

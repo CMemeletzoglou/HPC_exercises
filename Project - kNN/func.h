@@ -60,9 +60,9 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 		{
 			for (int k = 0; k < PROBDIM; k++)
 		#if defined(SIMD)
-			queries[i].x[k] = data[i * (PROBDIM + 1) + k];
+				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
 		#else
-			queries[i].x = &data[i * (PROBDIM + 1)];
+				queries[i].x = &data[i * (PROBDIM + 1)];
 		#endif
 
 			for (int j = 0; j < NNBS; j++)

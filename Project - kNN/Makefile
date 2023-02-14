@@ -9,6 +9,7 @@ HIGH ?= 2
 CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -O3 -march=native
 CFLAGS += -DSURROGATES -Wall
 NVCCFLAGS = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -O3 --gpu-architecture=sm_35
+NVCCFLAGS += -allow-unsupported-compiler
 LDFLAGS += -lm 
 
 all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda
