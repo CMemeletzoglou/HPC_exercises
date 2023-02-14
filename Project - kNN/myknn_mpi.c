@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "func_mpi.h"
+#include <stddef.h>
 
 #ifndef PROBDIM
 #define PROBDIM 2
@@ -45,15 +46,17 @@ int main(int argc, char *argv[])
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
 
-#if defined(SIMD)
-	printf("Running with SIMD\n");
-#endif 
 
         // MPI Init
         int rank, nprocs;
         MPI_Init(&argc, &argv);
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
+
+#if defined(SIMD)
+        if (rank == 0)
+	        printf("Running with SIMD\n");
+#endif 
         
         int vector_size = PROBDIM + 1;
         int local_ntrainelems = TRAINELEMS / nprocs;
@@ -140,12 +143,12 @@ int main(int argc, char *argv[])
 	// assert(local_ntrainelems % train_block_size == 0);
 
 	/* COMPUTATION PART */
-	double t0, t1, t_first = 0.0, t_sum = 0.0;
+	double t0, t1, t2 = 0.0, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
 	double err_sum = 0.0;
 
 	int queryelems_blocksize = QUERYELEMS / nprocs;
-	int rank_in_charge, pack_pos = 0;
+	int rank_in_charge;
 	
 	// we actually need an MPI_Request object per asynchronous communication call
 	MPI_Request request[nprocs - 1];
@@ -156,12 +159,11 @@ int main(int argc, char *argv[])
 
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
-
-	// Calculate the necessary sizes in order to allocate a temp buffer for use with MPI_Pack
-	int size_int_arr, size_double_arr;
-	MPI_Pack_size(NNBS, MPI_INT, MPI_COMM_WORLD, &size_int_arr);
-	MPI_Pack_size(NNBS, MPI_DOUBLE, MPI_COMM_WORLD, &size_double_arr);
 	
+        /* Configure the Derived Datatype for the query_t struct */
+        // https://mpi.deino.net/mpi_functions/MPI_Type_create_struct.html
+        // https://stackoverflow.com/questions/33618937/trouble-understanding-mpi-type-create-struct
+
 	/* Each query_t object contains: 
 	 * - a pointer to a double vector of size PROBDIM (we don't need to send this vector, 
 	 *   so don't account its size)
@@ -169,10 +171,18 @@ int main(int argc, char *argv[])
 	 * - two double arrays of size NNBS -> 2 * size_double_arr .
 	 * Therefore, the total buffer size is equal to :
 	 */
-	int pack_buf_size = size_int_arr + 2 * size_double_arr;
+	MPI_Datatype mpi_query_t;                                 // The name of the Derived Datatype
+        MPI_Datatype type[3] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE}; // The MPI_Datatype of each struct member
+        int blocklen[3] = {NNBS, NNBS, NNBS};                     // The size of each array (use 1 if scalar)
+        MPI_Aint disp[3];                                         // MPI Array of displacements
 
-	// Buffer for the MPI "packets"
-	char *pack_buf = (char *)malloc(pack_buf_size * sizeof(char));
+        disp[0] = offsetof(query_t, nn_idx);
+        disp[1] = offsetof(query_t, nn_dist);
+        disp[2] = offsetof(query_t, nn_val);
+
+        MPI_Type_create_struct(3, blocklen, disp, type, &mpi_query_t);
+        MPI_Type_commit(&mpi_query_t);
+
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
 
@@ -197,24 +207,21 @@ int main(int argc, char *argv[])
 	// TODO: one more loop here for the case of "cache blocking"
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
+                if (i == first_query)
+                        t2 = gettime();
+
 		compute_knn_brute_force(xdata, ydata, &(queries[i]), PROBDIM, NNBS, global_block_offset, 0, local_ntrainelems);
 
 		rank_in_charge = get_rank_in_charge_of(i, queryelems_blocksize, nprocs);
-                // We use MPI_Pack to make code portable
 		if (rank_in_charge != rank)
-		{
-			pack_pos = 0;
-			MPI_Pack(queries[i].nn_idx, NNBS, MPI_INT, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
-			MPI_Pack(queries[i].nn_dist, NNBS, MPI_DOUBLE, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
-			MPI_Pack(queries[i].nn_val, NNBS, MPI_DOUBLE, pack_buf, pack_buf_size, &pack_pos, MPI_COMM_WORLD);
-			assert(pack_pos <= pack_buf_size);
-			
-			// Send the "packet" message
-			MPI_Isend(pack_buf, pack_buf_size, MPI_PACKED, rank_in_charge, i, MPI_COMM_WORLD, &request[rank_in_charge]);
-		}
+			MPI_Isend(&(queries[i]), 1, mpi_query_t, rank_in_charge, i, MPI_COMM_WORLD, &request[rank_in_charge]);
+
+                if (i == first_query)
+                        t_first += gettime() - t2;
 	}
 
 	int rcv_buf_offset = 0;
+        t2 = gettime();
 	for (int i = first_query; i <= last_query; i++)
 	{
 		/* (c) Gather the collections of k nearest neighbors sent by the other ranks.
@@ -233,20 +240,14 @@ int main(int argc, char *argv[])
 			if (j == rank)
 				continue;
 
-			// Receive the "packet" message
-			// MPI_Recv(pack_buf, pack_buf_size, MPI_PACKED, j, i, MPI_COMM_WORLD, &status);
-			MPI_Recv(pack_buf, pack_buf_size, MPI_BYTE, j, i, MPI_COMM_WORLD, &status); // WTF NOW BOTH WORK
-
-			// Unpack the "packet" message	
-			pack_pos = 0;
-			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_idx, NNBS, MPI_INT, MPI_COMM_WORLD);
-			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_dist, NNBS, MPI_DOUBLE, MPI_COMM_WORLD);
-			MPI_Unpack(pack_buf, pack_buf_size, &pack_pos, rcv_buf[rcv_buf_offset].nn_val, NNBS, MPI_DOUBLE, MPI_COMM_WORLD);
-			rcv_buf_offset++;
-			assert(pack_pos <= pack_buf_size);
+                        assert(rcv_buf_offset < nprocs);
+			MPI_Recv(&(rcv_buf[rcv_buf_offset++]), 1, mpi_query_t, j, i, MPI_COMM_WORLD, &status);
 		}
 		// (d) Update the k neighbors of each query points under our control using the data we received from the other ranks.
 		reduce_in_struct(&(queries[i]), rcv_buf, nprocs - 1);
+
+                if (i == first_query)
+                        t_first += gettime() - t2;
 	}
 	t1 = gettime();
 	t_sum = t1 - t0;
@@ -346,7 +347,6 @@ int main(int argc, char *argv[])
 	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &err_sum, &err_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 	MPI_Reduce(rank == 0 ? MPI_IN_PLACE : &sse, &sse, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
-
         if(rank == 0) // only rank 0 prints
         {
                 double mse = sse / QUERYELEMS;
@@ -361,15 +361,17 @@ int main(int argc, char *argv[])
 
                 printf("Total time = %lf secs\n", t_sum);
                 
-		// TODO: Print average time of first query per block
-		// OR maybe we should print the time for the "longest" first query, i.e. MPI_MAX reduction on t_first instead of MPI_SUM
 		printf("Average time for 1st query = %lf secs\n", t_first / nprocs);
 		printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
 		printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
         }
 
 	/* CLEANUP */
-
+        // MPI_Reduce does not guarantee that a non-root process will not reach here
+        // while the root process is still Receiving the messages.
+        // Thus I need to wait for all messages to be received. A better way would probably be to wait on the requests
+        // https://stackoverflow.com/questions/8596774/is-open-mpis-reduce-syncrhonized
+        MPI_Barrier(MPI_COMM_WORLD);
 #if defined(DEBUG)
 	MPI_File_close(&f);
 #endif
@@ -391,7 +393,6 @@ int main(int argc, char *argv[])
 	free(mem);
 
 	free(rcv_buf);
-	free(pack_buf);
 
 	MPI_Finalize();
 	return 0;
