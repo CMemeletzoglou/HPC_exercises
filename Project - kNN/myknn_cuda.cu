@@ -2,7 +2,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
-#include "func.h"
+#include "func_cuda.h"
 
 #ifndef PROBDIM
 #define PROBDIM 2
@@ -10,61 +10,19 @@
 
 #define TRAIN_BLOCK_SIZE 1024 //initial testing
 
-__device__ double find_knn_value(double *dev_mem, double *dev_ydata, query_t *q, int k, int block_start, int block_size)
-{
-	// double fd[knn];	      	      // function values for the knn neighbors
-
-	compute_knn_brute_force_cuda(dev_mem, dev_ydata, q, PROBDIM, k, block_start, block_size); // brute-force / linear search
-
-	// for (int i = 0; i < knn; i++)
-	// 	fd[i] = ydata[nn_x[i]];
-
-	
-	// predict value inlined -> change this later to a function call
-	double sum_v = 0.0;
-	for (int i = 0; i < k; i++)
-		sum_v += dev_ydata[i];
-
-	return sum_v / k;
-}
-
-__global__ void knn_kernel(double *dev_mem, double *dev_ydata, double *dev_query_ydata, query_t *dev_queries, int k, double *sse, double *err_sum)
+__global__ void knn_kernel(double *dev_mem, double *dev_ydata, double *dev_query_ydata, query_t *dev_queries, int k, double *sse, double *err)
 {
 	double t0, t1, t_first = 0.0, t_sum = 0.0;
-	// double sse = 0.0;
-	double err; //, err_sum = 0.0;
-
+        double yp;
 	int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
 	for (int block_start = 0; block_start < TRAINELEMS; block_start += TRAIN_BLOCK_SIZE)
-	{
-		int query_idx = block_start + tid;
-		// t0 = gettime();
-		double yp = find_knn_value(dev_mem, dev_ydata, &(dev_queries[query_idx]), k, block_start, TRAIN_BLOCK_SIZE);
-		printf("For query %d and block start %d, yp = %.5f\n", tid, block_start, yp);
+		compute_knn_brute_force_cuda(dev_mem, dev_ydata, &(dev_queries[tid]), PROBDIM, k, block_start, TRAIN_BLOCK_SIZE); // brute-force / linear search
 
-		// double yp = find_knn_value(&dev_queries[i], NNBS);
-		// t1 = gettime();
-		// t_sum += (t1-t0); // don't care will count at host side
-		// if (i == 0)
-		// 	t_first = (t1-t0);
-
-		// sse += (y[i] - yp) * (y[i] - yp);
-
-		sse[tid] += (dev_query_ydata[tid] - yp) * (dev_query_ydata[tid] - yp);
-		err = 100.0 * fabs((yp - dev_query_ydata[tid]) / dev_query_ydata[tid]);
-		err_sum[tid] += err;
-	}
-
-#if DEBUG
-		for (int k = 0; k < PROBDIM; k++)
-			fprintf(fpout, "%.5f ", query_mem[i * (PROBDIM + 1) + k]);
-#endif
-
-
-#if DEBUG
-		fprintf(fpout,"%.5f %.5f %.2f\n", y[i], yp, err);
-#endif
+	// Predict query point value
+        yp = predict_value(&(dev_queries[tid]), dev_ydata, PROBDIM, NNBS);
+        sse[tid] = (dev_query_ydata[tid] - yp) * (dev_query_ydata[tid] - yp);
+        err[tid] = 100.0 * fabs((yp - dev_query_ydata[tid]) / dev_query_ydata[tid]);
 }
 
 
@@ -90,7 +48,7 @@ int main(int argc, char *argv[])
         FILE *fpout = fopen("output.knn.txt","w");
 #endif
         int vector_size = PROBDIM + 1;
-	double *dev_mem, *dev_ydata, *dev_query_ydata, *dev_sse, *dev_err; //*dev_query_mem
+	double *dev_mem, *dev_ydata, *dev_query_ydata, *dev_sse, *dev_err;
 	query_t *dev_queries;
 	
 	// ******************************************************************
@@ -102,23 +60,23 @@ int main(int argc, char *argv[])
 	double *query_ydata = (double*)malloc(QUERYELEMS * sizeof(double));		 // Query Element Surrogate values
 	query_t *queries = (query_t *)malloc(QUERYELEMS * sizeof(query_t));		 // Query Element helper structs
 
+	double *train_buf = (double*)malloc(TRAINELEMS * PROBDIM * sizeof(double));
+
 	// ******************************************************************
 	// ************************** Load Data *****************************
 	// ******************************************************************
 	load_binary_data(trainfile, mem, NULL, TRAINELEMS * (PROBDIM + 1));
 	load_binary_data(queryfile, query_mem, queries, QUERYELEMS * vector_size);
 
+	extract_vector(mem, train_buf, TRAINELEMS, PROBDIM + 1, PROBDIM);
+
 	// ******************************************************************
 	// ************************** Device mallocs ************************
 	// ******************************************************************
 	// allocate global memory on the device for the training element and query vectors
 
-        cudaMalloc((void**)&dev_mem, TRAINELEMS * vector_size * sizeof(double));	 // Device Training Element vectors
+        cudaMalloc((void**)&dev_mem, TRAINELEMS * PROBDIM * sizeof(double));	 	 // Device Training Element vectors
         cudaMalloc((void**)&dev_ydata, TRAINELEMS * sizeof(double));			 // Device Training Element Surrogate values
-        
-	// ---- maybe un-needed ------------------------------
-	// cudaMalloc((void**)&dev_query_mem, QUERYELEMS * vector_size * sizeof(double));	 // Device Query Element vectors
-        // ---------------------------------------------------
 
         cudaMalloc((void**)&dev_query_ydata, QUERYELEMS * sizeof(double));		 // Device Query Element Surrogate values
         cudaMalloc((void**)&dev_queries, QUERYELEMS * sizeof(query_t));			 // Device Query Element helper structs
@@ -155,24 +113,22 @@ int main(int argc, char *argv[])
 	// ******************************************************************
 	// ************************** Copyout data to device ****************
 	// ******************************************************************	
-	cudaMemcpy(dev_mem, mem, TRAINELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice); 		 // copy train elems
+	cudaMemcpy(dev_mem, train_buf, TRAINELEMS * PROBDIM * sizeof(double), cudaMemcpyHostToDevice); 		 // copy train elems
 	cudaMemcpy(dev_ydata, ydata, TRAINELEMS * sizeof(double), cudaMemcpyHostToDevice); 			 // copy train elems surrogate values
        
-        // ---- maybe un-needed ------------------------------
-        // cudaMemcpy(query_mem, dev_query_mem, QUERYELEMS * vector_size * sizeof(double), cudaMemcpyHostToDevice); // copy query elems
-        // ---------------------------------------------------
-
 	cudaMemcpy(dev_query_ydata, query_ydata, QUERYELEMS * sizeof(double), cudaMemcpyHostToDevice); 		 // copy query elems surrogate values
         cudaMemcpy(dev_queries, queries, QUERYELEMS * sizeof(query_t), cudaMemcpyHostToDevice);			 // copy query elems structs
 
 	/* COMPUTATION PART */
         double t_start = gettime();
-        // cuda kernel launch here.. initial test.. 1 thread block with 1024 threads
-	knn_kernel<<<1, 1024>>>(dev_mem, dev_ydata, dev_query_ydata, dev_queries, NNBS, dev_sse, dev_err);
 
-	//sync before getting final time
-	cudaDeviceSynchronize(); // wait for GPU to finish executin the kNN kernel
-	double t_sum = gettime() - t_start;
+	knn_kernel<<<8, 128>>>(dev_mem, dev_ydata, dev_query_ydata, dev_queries, NNBS, dev_sse, dev_err);
+	// knn_kernel<<<32, 32>>>(dev_mem, dev_ydata, dev_query_ydata, dev_queries, NNBS, dev_sse, dev_err);
+	// knn_kernel<<<16, 64>>>(dev_mem, dev_ydata, dev_query_ydata, dev_queries, NNBS, dev_sse, dev_err);
+
+	// sync device and host before getting final time
+	cudaDeviceSynchronize();
+        double t_sum = gettime() - t_start;
 
 	double sse = 0.0f, err_sum = 0.0f;
 	double *buf = (double *)malloc(QUERYELEMS * sizeof(double));
@@ -185,9 +141,7 @@ int main(int argc, char *argv[])
 		err_sum += buf[i];
 
 	/* CALCULATE AND DISPLAY RESULTS */
-
 	// these will be calculated on the CPU
-
 	double mse = sse / QUERYELEMS;
 	double ymean = compute_mean(query_ydata, QUERYELEMS);
 	double var = compute_var(query_ydata, QUERYELEMS, ymean);
@@ -215,6 +169,8 @@ int main(int argc, char *argv[])
 	free(query_mem);
 	free(query_ydata);
 	free(queries);
+	free(buf);
+        free(train_buf);
 
         cudaFree(dev_mem);
 	cudaFree(dev_ydata);
