@@ -19,7 +19,11 @@
 typedef struct query_s
 {
 	// __attribute__((aligned(32))) double x[PROBDIM]; // Query's coordinate
+#if defined(CUDA)
+	double x[PROBDIM]
+#else
 	double *x;
+#endif
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
 	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
 	double nn_val[NNBS];
@@ -59,7 +63,7 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 		for (int i = 0; i < QUERYELEMS; i++)
 		{
 			for (int k = 0; k < PROBDIM; k++)
-		#if defined(SIMD)
+		#if defined(SIMD) || defined(CUDA)
 				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
 		#else
 				queries[i].x = &data[i * (PROBDIM + 1)];

@@ -71,7 +71,7 @@ myknn_cuda: myknn_cuda.o
 	nvcc -o myknn_cuda myknn_cuda.o
 
 myknn_cuda.o: myknn_cuda.cu
-	nvcc $(NVCCFLAGS) -o myknn_cuda.o -c myknn_cuda.cu
+	nvcc -DCUDA $(NVCCFLAGS) -o myknn_cuda.o -c myknn_cuda.cu
 
 clean:
 	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda
