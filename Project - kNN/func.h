@@ -432,7 +432,7 @@ void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim,
 
 // #if defined(CUDA)
 // __device__ void compute_knn_brute_force(double *xdata, double *ydata, query_t *q, int dim, int k, int global_block_offset, int block_size)
-__device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_start, int train_block_size)
+void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_start, int train_block_size)
 {
 	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
 	 * mpi_block_offset : use this in case you have training elements blocking for MPI (i.e. blocking on the local block)

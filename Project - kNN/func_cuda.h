@@ -16,7 +16,7 @@ typedef struct query_s
 	double x[PROBDIM];
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
 	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
-	double nn_val[NNBS];
+	// double nn_val[NNBS];
 } query_t;
 
 /* I/O routines */
@@ -61,24 +61,10 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 			for (int j = 0; j < NNBS; j++)
 				queries[i].nn_dist[j] = 1e99 - j;
 
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_val[j] = -1;
+			// for (int j = 0; j < NNBS; j++)
+			// 	queries[i].nn_val[j] = -1;
 		}
 	}
-}
-
-// helper function to get L1d size in order to set the appropriate training block size
-void get_L1d_size(int *L1d_size)
-{
-#if defined(__linux__)
-	FILE *fptr = fopen("/sys/devices/system/cpu/cpu0/cache/index0/size", "r");
-	if (fptr)
-		fscanf(fptr, "%d", L1d_size);
-
-	fclose(fptr);
-#else
-	*L1d_size = 0;
-#endif
 }
 
 /* Timer */
@@ -178,33 +164,46 @@ __device__ double compute_max_pos(double *v, int n, int *pos)
 	return vmax;
 }
 
-void extract_vector(double *input_arr, double *output_arr, int nrows, int input_dim, int output_dim)
+void extract_vectors(double *input_arr, double *output_arr, int nrows, int input_dim, int output_dim)
 {
 	for(int i = 0; i < nrows; i++)
 		for(int j = 0; j < output_dim; j++)
 			output_arr[i * output_dim + j] = input_arr[i * input_dim + j];
 }
 
-__device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_start, int train_block_size)
+// __device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_idx, int train_block_size)
+__device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, double *q, int dim, int k, int train_block_idx, int train_block_size)
 {
 	int i, gi, xdata_idx, max_i;
 	double max_d, new_d;
 	
+	// thread block shared memory arrays, for the k neighbor indexes and distances, that each thread computes
+	__shared__ int nn_idx[k * blockDim.y];
+	__shared__ double nn_dist[k * blockDim.y];
+	
+	int train_block_start = train_block_idx * train_block_size;
+
 	// find K neighbors
-	max_d = compute_max_pos(q->nn_dist, k, &max_i);
+	// max_d = compute_max_pos(q->nn_dist, k, &max_i);
+	max_d = 1e99;
 	for (i = 0; i < train_block_size; i++) // i runs inside each training block's boundaries
 	{
 		xdata_idx = train_block_start + i;
 		
-		new_d = compute_dist(q->x, &(xdata[xdata_idx * dim]), dim); // euclidean
+		new_d = compute_dist(q, &(xdata[xdata_idx * dim]), dim); // euclidean
 		if (new_d < max_d) // add point to the list of knns, replace element max_i
 		{	
-			q->nn_idx[max_i] = xdata_idx;
-			q->nn_dist[max_i] = new_d;
-			q->nn_val[max_i] = ydata[xdata_idx];
+			nn_idx[threadIdx.y * k + 0]
+			// q->nn_idx[max_i] = xdata_idx;
+			// q->nn_dist[max_i] = new_d;
+			// q->nn_val[max_i] = ydata[xdata_idx];
 		}
 		max_d = compute_max_pos(q->nn_dist, k, &max_i);
 	}
+
+	// column-wise reduction, i.e. for each query point
+	
+	
 }
 
 /* compute an approximation based on the values of the neighbors */
