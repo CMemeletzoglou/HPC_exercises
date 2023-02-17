@@ -19,11 +19,7 @@
 typedef struct query_s
 {
 	// __attribute__((aligned(32))) double x[PROBDIM]; // Query's coordinate
-#if defined(CUDA)
-	double x[PROBDIM];
-#else
 	double *x;
-#endif
 	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
 	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
 	double nn_val[NNBS];
@@ -63,7 +59,7 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 		for (int i = 0; i < QUERYELEMS; i++)
 		{
 			for (int k = 0; k < PROBDIM; k++)
-		#if defined(SIMD) || defined(CUDA)
+		#if defined(SIMD)
 				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
 		#else
 				queries[i].x = &data[i * (PROBDIM + 1)];
@@ -233,11 +229,8 @@ double compute_var(double *v, int n, double mean)
 	return s/n;
 }
 
-#if defined(CUDA)
-	__device__ __host__ double compute_dist(double *v, double *w, int n)
-#else
-	double compute_dist(double *v, double *w, int n)
-#endif
+
+double compute_dist(double *v, double *w, int n)
 {
 #if defined (SIMD)
 	__builtin_assume_aligned(v, 32);
@@ -299,11 +292,9 @@ double compute_var(double *v, int n, double mean)
 #endif
 }
 
-#if defined(CUDA)
-	__device__ __host__ double compute_max_pos(double *v, int n, int *pos)
-#else
-	double compute_max_pos(double *v, int n, int *pos)
-#endif
+
+
+double compute_max_pos(double *v, int n, int *pos)
 {
 	int i, p = 0;
 	double vmax = v[0];
@@ -429,37 +420,6 @@ void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim,
 	// 	}
 	// }
 }
-
-// #if defined(CUDA)
-// __device__ void compute_knn_brute_force(double *xdata, double *ydata, query_t *q, int dim, int k, int global_block_offset, int block_size)
-void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_start, int train_block_size)
-{
-	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
-	 * mpi_block_offset : use this in case you have training elements blocking for MPI (i.e. blocking on the local block)
-	 * block_size : the amount of training elements in xdata to iterate over,
-	 * 				starting from index (global_block_offset + mpi_block_offset)
-	 */
-	int i, gi, xdata_idx, max_i;
-	double max_d, new_d;
-	
-	// find K neighbors
-	max_d = compute_max_pos(q->nn_dist, k, &max_i);
-	for (i = 0; i < train_block_size; i++) // i runs inside each training block's boundaries
-	{
-		xdata_idx = train_block_start + i;
-		
-		new_d = compute_dist(q->x, &(xdata[xdata_idx]), dim); // euclidean
-		if (new_d < max_d) // add point to the list of knns, replace element max_i
-		{	
-			q->nn_idx[max_i] = xdata_idx;
-			q->nn_dist[max_i] = new_d;
-			q->nn_val[max_i] = ydata[xdata_idx];
-		}
-		max_d = compute_max_pos(q->nn_dist, k, &max_i);
-	}
-}
-// #endif
-
 
 
 /* compute an approximation based on the values of the neighbors */

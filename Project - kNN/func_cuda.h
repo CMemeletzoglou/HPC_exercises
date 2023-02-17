@@ -6,19 +6,6 @@
 #include <stdlib.h>
 #include <assert.h>
 
-// struct that will preserve the k nearest neighbors for each query.
-// Will be used in order to load training data in a blocking fashion,
-// iterating over all query points. Thus for each query point we will
-// need to preserve the k nearest neighbors that have been found so far
-// in the preceding blocks.
-typedef struct query_s
-{
-	double x[PROBDIM];
-	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
-	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
-	// double nn_val[NNBS];
-} query_t;
-
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
 {
@@ -34,7 +21,7 @@ void store_binary_data(char *filename, double *data, int n)
 	fclose(fp);
 }
 
-void load_binary_data(const char *filename, double *data, query_t *queries, const int n)
+void load_binary_data(const char *filename, double *data, const int n)
 {
 	FILE *fp;
 	fp = fopen(filename, "rb");
@@ -46,25 +33,6 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 	size_t nelems = fread(data, sizeof(double), n, fp);
 	assert(nelems == n); // check that all elements were actually read
 	fclose(fp);
-
-	// If queries are loaded, initialize the queries structs
-	if (queries != NULL)
-	{
-		for (int i = 0; i < QUERYELEMS; i++)
-		{
-			for (int k = 0; k < PROBDIM; k++)
-				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
-
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_idx[j] = -1;
-
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_dist[j] = 1e99 - j;
-
-			// for (int j = 0; j < NNBS; j++)
-			// 	queries[i].nn_val[j] = -1;
-		}
-	}
 }
 
 /* Timer */
@@ -171,56 +139,15 @@ void extract_vectors(double *input_arr, double *output_arr, int nrows, int input
 			output_arr[i * output_dim + j] = input_arr[i * input_dim + j];
 }
 
-// __device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, query_t *q, int dim, int k, int train_block_idx, int train_block_size)
-__device__ void compute_knn_brute_force_cuda(double *xdata, double *ydata, double *q, int *nn_idx, int dim, int k, int train_block_idx, int train_block_size)
-{
-	int i, gi, xdata_idx, max_i;
-	double max_d, new_d;
-	
-	// thread block shared memory arrays, for the k neighbor indexes and distances, that each thread computes for its assigned query point
-	// __shared__ int nn_idx[k * blockDim.y];
-	// __shared__ double nn_dist[k * blockDim.y];
-	
-	int train_block_start = train_block_idx * train_block_size;
-	int ty = threadIdx.y;
-	int tx = threadIdx.x;
-
-	for(int j = 0; j < k; j++)
-		nn_dist[ty * k + j] = 1e99 - j; // initialize "my" distances
-	
-	// find K neighbors
-	max_d = compute_max_pos(&(nn_dist[ty * k]), k, &max_i);
-	for (i = 0; i < train_block_size; i++) // i runs inside each training block's boundaries
-	{
-		xdata_idx = train_block_start + i;
-		
-		new_d = compute_dist(q, &(xdata[xdata_idx * dim]), dim); // euclidean
-		if (new_d < max_d) // add point to the list of knns, replace element max_i
-		{	
-			nn_idx[max_i] = xdata_idx;
-			nn_dist[max_i] = new_d;
-		}
-		max_d = compute_max_pos(&(nn_dist[ty * k]), k, &max_i);
-	}
-
-	__syncthreads(); // sync barrier for all threads of the same thread block
-
-	// column-wise reduction, i.e. for each query point
-	// column-wise -> threads with the same threadIdx.x
-
-}
-
-
-
-
 /* compute an approximation based on the values of the neighbors */
 // double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
-__device__ double predict_value(query_t* q, double *ydata, int dim, int knn)
-{
-	int i;
-	double sum_v = 0.0;
-	for (i = 0; i < knn; i++)
-		sum_v += ydata[q->nn_idx[i]];
+// __device__ double predict_value(query_t* q, double *ydata, int dim, int knn)
+// __device__ double predict_value(double* q, double *ydata, int dim, int knn)
+// {
+// 	int i;
+// 	double sum_v = 0.0;
+// 	for (i = 0; i < knn; i++)
+// 		sum_v += ydata[q->nn_idx[i]];
 
-	return sum_v / knn;
-}
+// 	return sum_v / knn;
+// }
