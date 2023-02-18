@@ -140,14 +140,13 @@ void extract_vectors(double *input_arr, double *output_arr, int nrows, int input
 }
 
 /* compute an approximation based on the values of the neighbors */
-// double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
-// __device__ double predict_value(query_t* q, double *ydata, int dim, int knn)
-// __device__ double predict_value(double* q, double *ydata, int dim, int knn)
-// {
-// 	int i;
-// 	double sum_v = 0.0;
-// 	for (i = 0; i < knn; i++)
-// 		sum_v += ydata[q->nn_idx[i]];
+// __inline__ __device__ double predict_value(double *ydata, int knn)
+__device__ double predict_value(double *ydata, int knn)
+{
+	int i;
+	double sum_v = 0.0;
+	for (i = 0; i < knn; i++)
+		sum_v += ydata[i];
 
-// 	return sum_v / knn;
-// }
+	return sum_v / knn;
+}

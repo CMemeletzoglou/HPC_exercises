@@ -35,7 +35,7 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
         // One thread uses a single buf element (1 to 1 correspondance)
         __shared__ int buf[QUERY_BLOCK_SIZE * TRAIN_BLOCK_SIZE];
 
-	for(int i = 0; i < k; i++) // all threads will participate in finding each of the k neighbors
+	for(int neigh = 0; neigh < k; neigh++) // all threads will participate in finding each of the k neighbors
         {
                 // Initially the buffer line for each query (indexed by threadIdx.y) ([0, QUERY_BLOCK_SIZE-1])
                 // should contain the indexes of the local training point (threadIdx.x) ([0, TRAIN_BLOCK_SIZE-1])
@@ -58,24 +58,24 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
                         {
                                 int curr_idx = threadIdx.y * blockDim.x + threadIdx.x;
                                 int next_idx = curr_idx + pow(2, j);
-                                buf[curr_idx] = dist_vec[buf[curr_idx]] < dist_vec[buf[next_idx]] ? curr_idx : next_idx;
+                                buf[curr_idx] = (dist_vec[buf[curr_idx]] < dist_vec[buf[next_idx]]) ? curr_idx : next_idx;
                         }
                 }
                 
-		// TODO: set the distance of the current min neighbor to "inf"
+                // Only threads with threadIdx.x == 0 does the last reduction, thus there is no need to __synchthreads here.
 		if (threadIdx.x == 0)
 		{
 			// Recover threadIdx.x as explained above
-			// global_nn_idx[(blockIdx.x*blockDim.y + threadIdx.y)*k + i] =
+			// global_nn_idx[(blockIdx.x*blockDim.y + threadIdx.y)*k + neigh] =
 			// 		blockIdx.x * blockDim.x + (buf[threadIdx.y * blockDim.x + 0] - threadIdx.y * blockDim.x);
 					
-			// global_nn_dist[(blockIdx.x*blockDim.y + threadIdx.y)*k + i] =
+			// global_nn_dist[(blockIdx.x*blockDim.y + threadIdx.y)*k + neigh] =
 			// 		dist_vec[buf[threadIdx.y * blockDim.x + 0]];
 
-                        global_nn_idx[(threadIdx.y*gridDim.x + blockIdx.x)*k + i] = 
+                        global_nn_idx[(threadIdx.y*gridDim.x + blockIdx.x)*k + neigh] = 
                                         blockIdx.x * blockDim.x + (buf[threadIdx.y * blockDim.x + 0] - threadIdx.y * blockDim.x);
 
-                        global_nn_dist[(threadIdx.y*gridDim.x + blockIdx.x)*k + i] = 
+                        global_nn_dist[(threadIdx.y*gridDim.x + blockIdx.x)*k + neigh] = 
                                         dist_vec[buf[threadIdx.y * blockDim.x + 0]];
 
 			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = 1e99;
@@ -88,7 +88,7 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 					 size_t trainel_block_size, size_t queryel_block_size)
 {
 	extern __shared__ double arr[];
-
+	
 	double *trainel_block = arr;	
 	double *query_block = trainel_block + trainel_block_size;
 	double *dist_vec = query_block + queryel_block_size;
@@ -128,35 +128,110 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
         thread_block_reduction(dist_vec, global_nn_idx, global_nn_dist, local_query_idx, k);
 }
 
-__global__ void reduce_distance_kernel(int *nn_idx, double *nn_dist, int len, int k, size_t dist_vec_size)
+__global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dist, int len, int k, size_t dist_vec_size)
 {
-        extern __shared__ char shared_arr[];
-        double *dist = (double *)shared_arr;
-        int *idx = (int *)(shared_arr + dist_vec_size);
+        __shared__ int buf[QUERY_BLOCK_SIZE * TRAIN_BLOCK_SIZE]; // static shared memory buffer
+	
+        extern __shared__ char shared_arr[]; 			 // dynamically allocated shared memory
+        double *dist_vec = (double *)shared_arr;
+        int *idx_vec = (int *)(shared_arr + dist_vec_size);
 
         // Indexes for the global memory (be careful you only have the partial matrix in memory)
         int global_tx = blockIdx.x * blockDim.x + threadIdx.x; // matrix col this thread is in
         int global_ty = blockIdx.y * blockDim.y + threadIdx.y; // matrix row this thread is in
 	
         // Indexes for the shared memory
-	int local_trainel_idx = threadIdx.x; // thread-block col of current thread
-	int local_query_idx = threadIdx.y; // thread-block row of current thread
+	int local_neigh_idx = threadIdx.x; // thread-block col of current thread -> local "candidate neighbor"
+	int local_query_idx = threadIdx.y; // thread-block row of current thread -> local query point under reduction (same as global)
 
 	// load data into the proper shared memory regions from device global memory
 	// only the thread block's "zero" thread loads these data
         if(threadIdx.x == 0) 
         {
-		memcpy(dist + threadIdx.y * len, nn_dist + (threadIdx.y * gridDim.x + blockIdx.x)*k, len * sizeof(double));
-		memcpy(idx + threadIdx.y * len, nn_idx + (threadIdx.y * gridDim.x + blockIdx.x)*k, len * sizeof(int));
+		memcpy(dist_vec + threadIdx.y * len, global_nn_dist + (threadIdx.y * gridDim.x + blockIdx.x)*k, len * sizeof(double));
+		memcpy(idx_vec + threadIdx.y * len, global_nn_idx + (threadIdx.y * gridDim.x + blockIdx.x)*k, len * sizeof(int));
         }
 
-	// QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(double);
-        
 	__syncthreads();
 
-        // TODO: Do the reduction
+        // Decide on the number of iterations required to do the reduction to len elements
+	int num_iter = log2f(len);
+
+        int thread_block_local_tid = threadIdx.y * blockDim.x  + threadIdx.x;
+	for(int neigh = 0; neigh < k; neigh++)
+	{
+                // first iteration will be performed on data twice the size of the thread block
+                // so we may use all threads for this first step, we should only be careful with the indexing
+                // If the length (len) of the data we want to reduce is less than the available number of threads for
+                // each query (blockDim.x), we obviously should not perform this step
+                if (len > blockDim.x)
+                {
+		        __syncthreads();
+                        buf[thread_block_local_tid] = (dist_vec[2*thread_block_local_tid] < dist_vec[2*thread_block_local_tid+1]) 
+                                		      ? 2 * thread_block_local_tid
+                                		      : 2 * thread_block_local_tid + 1;
+                        --num_iter;
+                }
+		
+                buf[thread_block_local_tid] = threadIdx.y * blockDim.x  + threadIdx.x; // = thread_block_local_tid
+
+                for (int j = 0; j < num_iter; j++) // reduce the number of threads
+                {
+                        __syncthreads();
+                        // TODO: Replace mod with something more efficient (?)
+                        if (threadIdx.x % (int)pow(2, j+1) == 0 && threadIdx.x < len)
+                        {
+                                int curr_idx = thread_block_local_tid;
+                                int next_idx = curr_idx + pow(2, j);
+                                buf[curr_idx] = (dist_vec[buf[curr_idx]] < dist_vec[buf[next_idx]]) ? curr_idx : next_idx;
+                        }
+                }
+
+                // Only threads with threadIdx.x == 0 does the last reduction, thus there is no need to __synchthreads here.
+                if (threadIdx.x == 0)
+                {
+                        // TODO: Recover the threadIdx.x from buf[0] (for each query point)
+
+                        // Store the best k nearest neighbors calculated by this thread to the global 3d tensor
+                        // of size [QUERY_BLOCK_SIZE, gridDim.x, k].
+                        // As a reminder we may think about the current size of nn_dist and nn_idx,
+                        // which is [QUERY_BLOCK_SIZE, (len * gridDim.x) / k, k], 
+                        // where (len * gridDim.x) / k -> the number of thread blocks we used on the previous iteration.
+                        // len * gridDim.x -> the number of elements stored on the previous call of this kernel
+                        // (len * gridDim.x) / k -> number of thread blocks that wrote those elements on the previous kernel call, 
+                        // since each wrote k neighbors
+                        
+			global_nn_dist[(threadIdx.y * gridDim.x + blockIdx.x) * k + neigh] =
+                                                dist_vec[buf[threadIdx.y * blockDim.x + 0]];
+			
+			global_nn_idx[(threadIdx.y * gridDim.x + blockIdx.x) * k + neigh] =  
+                                                blockIdx.x * blockDim.x + (buf[threadIdx.y * blockDim.x + 0] - threadIdx.y * blockDim.x);
+			
+			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = 1e99;
+                }
+	}
 }
 
+__global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block, int k, double *dev_sse, double *dev_err)
+{
+	// __shared__ double neighbor_values[];
+
+	double neigh_vals[NNBS];
+
+	// if(tid <)
+        // each thread runs for a query (thus the global thread id is equal to the query id inside the quey block)
+	int tid = threadIdx.x; // running with a 1D Thread Block
+        int query_idx = query_block * QUERY_BLOCK_SIZE + tid;
+	for(int i = 0; i < k; i++)
+		neigh_vals[i] = dev_ydata[dev_nn_idx[tid * k + i]];
+                
+	// call predict_value
+	double yp = predict_value(neigh_vals, k);
+
+	// compute error metrics
+	dev_sse[query_idx] = (dev_query_ydata[query_idx] - yp) * (dev_query_ydata[query_idx] - yp);
+        dev_err[query_idx] = 100.0 * fabs((yp - dev_query_ydata[query_idx]) / dev_query_ydata[query_idx]);
+}
 
 int main(int argc, char **argv)
 {
@@ -288,7 +363,6 @@ int main(int argc, char **argv)
 	/* COMPUTATION PART */
         double t_start = gettime();
 	
-	
 	for(int i = 0; i < QUERYELEMS; i += QUERY_BLOCK_SIZE)
 	{
         	compute_distances_kernel<<<grid_dim, block_size, shared_mem_size>>>(dev_mem, dev_query_mem, i, QUERY_BLOCK_SIZE, 
@@ -296,8 +370,9 @@ int main(int argc, char **argv)
 	        
 		num_thread_blocks = ROW_THREAD_BLOCKS * NNBS / (2 * block_size.x);
                 dim3 reduction_block_size(block_size.x, QUERY_BLOCK_SIZE, 1);
+                
 		while(1)
-		{
+		{                        
                         // Calculate the number of thread blocks required
 			dim3 reduction_grid_dim((int)num_thread_blocks, 1, 1);
 			
@@ -311,8 +386,11 @@ int main(int argc, char **argv)
                         // The shared memory will be structured as:
                         // [query0 distances][query1 distances]...[query0 indexes][query1 indexes]...
                         // Calculate the shared memory size
-                        size_t reduction_dist_vector_size = QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(double);
-                        size_t reduction_idx_vector_size = QUERY_BLOCK_SIZE * 2* block_size.x * sizeof(int);
+                        size_t reduction_dist_vector_size = QUERY_BLOCK_SIZE * len * sizeof(double); 
+                        size_t reduction_idx_vector_size = QUERY_BLOCK_SIZE * len * sizeof(int);
+
+                        // size_t reduction_dist_vector_size = QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(double); // initial thought
+                        // size_t reduction_idx_vector_size = QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(int);
                         reduction_shared_mem_size = reduction_dist_vector_size + reduction_idx_vector_size;
 
 			reduce_distance_kernel<<<reduction_grid_dim, reduction_block_size, reduction_shared_mem_size>>> 
@@ -323,8 +401,10 @@ int main(int argc, char **argv)
                                 break;
 			num_thread_blocks = num_thread_blocks * NNBS / (2 * block_size.x);
 		}
-	}
 
+                // Find yp for each query and error metrics
+		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_sse, dev_err);
+	}
 
 	// sync device and host before getting final time
 	cudaDeviceSynchronize();
