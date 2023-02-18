@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -8,6 +7,8 @@
 #ifndef PROBDIM
 #define PROBDIM 2
 #endif
+
+#define INF 1e99
 
 /* IDEA : Calculate a matrix of size [QUERYELEMS, TRAINELEMS] where the element [i,j] is the
  * distance between the i-th query point and the j-th training point. Since this is a lightweight
@@ -34,6 +35,7 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
 {	
         // One thread uses a single buf element (1 to 1 correspondance)
         __shared__ int buf[QUERY_BLOCK_SIZE * TRAIN_BLOCK_SIZE];
+        double next_dist;
 
 	for(int neigh = 0; neigh < k; neigh++) // all threads will participate in finding each of the k neighbors
         {
@@ -52,14 +54,21 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
 
                 for (int j = 0; j < (int)log2f(blockDim.x); j++) // reduce the number of threads
                 {
-                        __syncthreads();
+                /*      __syncthreads();
                         // TODO: Replace mod with something more efficient (?)
                         if (threadIdx.x % (int)pow(2, j+1) == 0)
                         {
                                 int curr_idx = threadIdx.y * blockDim.x + threadIdx.x;
                                 int next_idx = curr_idx + pow(2, j);
                                 buf[curr_idx] = (dist_vec[buf[curr_idx]] < dist_vec[buf[next_idx]]) ? curr_idx : next_idx;
-                        }
+                        } 
+                */
+                        int curr_idx = threadIdx.y * blockDim.x + threadIdx.x;
+                        int next_idx = curr_idx + pow(2, j);
+			next_idx = next_idx > blockDim.x - 1 ? 0 : next_idx;
+                        next_dist = dist_vec[buf[next_idx]];
+                        __syncthreads();
+                        buf[curr_idx] = (dist_vec[buf[curr_idx]] < next_dist) ? curr_idx : next_idx;
                 }
                 
                 // Only threads with threadIdx.x == 0 does the last reduction, thus there is no need to __synchthreads here.
@@ -78,7 +87,7 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
                         global_nn_dist[(threadIdx.y*gridDim.x + blockIdx.x)*k + neigh] = 
                                         dist_vec[buf[threadIdx.y * blockDim.x + 0]];
 
-			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = 1e99;
+			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = INF;
 		}      
         }
 }
@@ -207,12 +216,12 @@ __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dis
 			global_nn_idx[(threadIdx.y * gridDim.x + blockIdx.x) * k + neigh] =  
                                                 blockIdx.x * blockDim.x + (buf[threadIdx.y * blockDim.x + 0] - threadIdx.y * blockDim.x);
 			
-			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = 1e99;
+			dist_vec[buf[threadIdx.y * blockDim.x + 0]] = INF;
                 }
 	}
 }
 
-__global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block, int k, double *dev_sse, double *dev_err)
+__global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block_start, int k, double *dev_sse, double *dev_err)
 {
 	// printf("RUNNING predict_query_values\n");
 
@@ -221,7 +230,7 @@ __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata,
 	// if(tid <)
         // each thread runs for a query (thus the global thread id is equal to the query id inside the quey block)
 	int tid = threadIdx.x; // running with a 1D Thread Block
-        int query_idx = query_block * QUERY_BLOCK_SIZE + tid;
+        int query_idx = query_block_start + tid;
 	for(int i = 0; i < k; i++)
 		neigh_vals[i] = dev_ydata[dev_nn_idx[tid * k + i]];
                 
@@ -411,7 +420,6 @@ int main(int argc, char **argv)
                 // Find yp for each query and error metrics
 		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_sse, dev_err);
                 // Check for any cuda errors you might be missing
-                // printf("predict_query_values error code: %d\n", cudaGetLastError());
                 assert(cudaGetLastError() == 0);
 	}
 
