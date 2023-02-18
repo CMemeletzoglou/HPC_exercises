@@ -121,8 +121,8 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
                 // cudaMemcpy(trainel_block, mem + trainel_block_offset, trainel_block_size, cudaMemcpyDeviceToDevice);
                 // cudaMemcpy(query_block, query_mem, queryel_block_size, cudaMemcpyDeviceToDevice);
 
-		// memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
-		// memcpy(query_block, query_mem, queryel_block_size);
+		memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
+		memcpy(query_block, query_mem, queryel_block_size);
         }
         
 	__syncthreads();
