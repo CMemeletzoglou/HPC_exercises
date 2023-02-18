@@ -87,11 +87,11 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 					 int *global_nn_idx, double *global_nn_dist, int k, int dim,
 					 size_t trainel_block_size, size_t queryel_block_size)
 {
-	extern __shared__ double arr[];
+	extern __shared__ char arr[];
 	
-	double *trainel_block = arr;	
-	double *query_block = trainel_block + trainel_block_size;
-	double *dist_vec = query_block + queryel_block_size;
+	double *trainel_block = (double *)arr;
+	double *query_block = (double *)(arr + trainel_block_size);
+	double *dist_vec = (double *)(arr + trainel_block_size + queryel_block_size);
 
 	int trainel_block_offset = blockIdx.x * blockDim.x;
 
@@ -112,8 +112,8 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
                 // cudaMemcpy(trainel_block, mem + trainel_block_offset, trainel_block_size, cudaMemcpyDeviceToDevice);
                 // cudaMemcpy(query_block, query_mem, queryel_block_size, cudaMemcpyDeviceToDevice);
 
-		memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
-		memcpy(query_block, query_mem, queryel_block_size);
+		// memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
+		// memcpy(query_block, query_mem, queryel_block_size);
         }
         
 	__syncthreads();
@@ -214,7 +214,7 @@ __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dis
 
 __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block, int k, double *dev_sse, double *dev_err)
 {
-	// __shared__ double neighbor_values[];
+	// printf("RUNNING predict_query_values\n");
 
 	double neigh_vals[NNBS];
 
@@ -243,6 +243,8 @@ int main(int argc, char **argv)
 	}
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
+
+        assert(TRAIN_BLOCK_SIZE > 32);
 
 	// int dev;
 	// cudaGetDevice(&dev); // get GPU device number
@@ -367,10 +369,12 @@ int main(int argc, char **argv)
 	{
         	compute_distances_kernel<<<grid_dim, block_size, shared_mem_size>>>(dev_mem, dev_query_mem, i, QUERY_BLOCK_SIZE, 
 		 					dev_nn_idx, dev_nn_dist, NNBS, PROBDIM, trainel_block_size, queryel_block_size);  // compute a "chunk" of rows
+                // Check for any cuda errors you might be missing
+                // printf("compute_distances_kernel error code: %d\n", cudaGetLastError());
+                assert(cudaGetLastError() == 0);
 	        
 		num_thread_blocks = ROW_THREAD_BLOCKS * NNBS / (2 * block_size.x);
                 dim3 reduction_block_size(block_size.x, QUERY_BLOCK_SIZE, 1);
-                
 		while(1)
 		{                        
                         // Calculate the number of thread blocks required
@@ -392,9 +396,11 @@ int main(int argc, char **argv)
                         // size_t reduction_dist_vector_size = QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(double); // initial thought
                         // size_t reduction_idx_vector_size = QUERY_BLOCK_SIZE * 2 * block_size.x * sizeof(int);
                         reduction_shared_mem_size = reduction_dist_vector_size + reduction_idx_vector_size;
-
-			reduce_distance_kernel<<<reduction_grid_dim, reduction_block_size, reduction_shared_mem_size>>> 
+			reduce_distance_kernel<<<reduction_grid_dim, reduction_block_size, reduction_shared_mem_size>>>
                                 (dev_nn_idx, dev_nn_dist, len, NNBS, reduction_dist_vector_size);
+                        // Check for any cuda errors you might be missing
+                        // printf("reduce_distance_kernel error code: %d\n", cudaGetLastError());
+                        assert(cudaGetLastError() == 0);
 			
                         // update control variable
                         if (num_thread_blocks == 1)
@@ -404,6 +410,9 @@ int main(int argc, char **argv)
 
                 // Find yp for each query and error metrics
 		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_sse, dev_err);
+                // Check for any cuda errors you might be missing
+                // printf("predict_query_values error code: %d\n", cudaGetLastError());
+                assert(cudaGetLastError() == 0);
 	}
 
 	// sync device and host before getting final time
