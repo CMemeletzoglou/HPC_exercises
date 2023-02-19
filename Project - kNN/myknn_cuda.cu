@@ -118,11 +118,8 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 	// only the thread block's "zero" thread loads these data
         if(threadIdx.x == 0 && threadIdx.y == 0) 
         {
-                // cudaMemcpy(trainel_block, mem + trainel_block_offset, trainel_block_size, cudaMemcpyDeviceToDevice);
-                // cudaMemcpy(query_block, query_mem, queryel_block_size, cudaMemcpyDeviceToDevice);
-
 		memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
-		memcpy(query_block, query_mem, queryel_block_size);
+		memcpy(query_block, query_mem + query_block_offset, queryel_block_size);
         }
         
 	__syncthreads();
@@ -223,8 +220,6 @@ __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dis
 
 __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block_start, int k, double *dev_sse, double *dev_err)
 {
-	// printf("RUNNING predict_query_values\n");
-
 	double neigh_vals[NNBS];
 
 	// if(tid <)
