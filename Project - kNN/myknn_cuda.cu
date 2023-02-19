@@ -119,6 +119,10 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
         if(threadIdx.x == 0 && threadIdx.y == 0) 
         {
 		memcpy(trainel_block, mem + trainel_block_offset, trainel_block_size);
+
+		/* __CHANGE__: We had forgotten to use the query_block_offset argument passed,
+		 * for the calculation of the query_mem "loading starting point".
+		 */
 		memcpy(query_block, query_mem + query_block_offset, queryel_block_size);
         }
         
@@ -126,8 +130,19 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 
 	// each thread computes the distance for its query point with its training element
 	// then it updates its respective position in the distances vector
+
+	/* __CHANGE__: Prior to this change each thread called compute_dist with
+	 * &query_block[local_query_idx] and &trainel_block[local_trainel_idx],
+	 * which is WRONG.
+	 * For example, ff a thread needs to compute the distance of query point 1 and
+	 * training element 1, we must not index the respective shared memory arrays,
+	 * using 1, because those arrays are 1D arrays whose elements are doubles,
+	 * but we must think of them as **"vectors" of size dim**.
+	 * So, when a thread needs the training element "1" it does not need
+	 * trainel_block[1] but trainel_block[1*dim], to skip the previous vector(s).
+	 */
 	dist_vec[local_query_idx * blockDim.x + local_trainel_idx] = 
-                	compute_dist(&query_block[local_query_idx], &trainel_block[local_trainel_idx], dim);
+                	compute_dist(&query_block[local_query_idx * dim], &trainel_block[local_trainel_idx * dim], dim);
 
 	__syncthreads();
 
