@@ -105,7 +105,6 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
 			dist_vec[trainel_idx_buf[curr_idx]] = INF;
 		}
         }
-        __syncthreads();
 }
 
 __global__ void compute_distances_kernel(double *mem, double *query_mem, int query_block_offset,
@@ -167,13 +166,7 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 
 	__syncthreads();
 
-        // thread_block_reduction(dist_vec, global_nn_idx, global_nn_dist, k);
-
-        global_nn_idx[threadIdx.y * TRAINELEMS + (blockIdx.x * blockDim.x + threadIdx.x)] = 
-                        blockIdx.x * blockDim.x + threadIdx.x;
-
-        global_nn_dist[threadIdx.y * TRAINELEMS + (blockIdx.x * blockDim.x + threadIdx.x)] = 
-                        dist_vec[local_query_idx * blockDim.x + local_trainel_idx];
+        thread_block_reduction(dist_vec, global_nn_idx, global_nn_dist, k);
 }
 
 __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dist, int len, int k, size_t dist_vec_size)
@@ -483,7 +476,7 @@ int main(int argc, char **argv)
 		// Check for any cuda errors you might be missing
 		assert(cudaGetLastError() == 0);
 		*/
-                int num_neigh_per_query = ROW_THREAD_BLOCKS * NNBS * 2;
+                int num_neigh_per_query = ROW_THREAD_BLOCKS * NNBS;
 		cudaMemcpy(temp_dist, dev_nn_dist, num_neigh_per_query * QUERY_BLOCK_SIZE * sizeof(double), cudaMemcpyDeviceToHost);
 		cudaMemcpy(temp_idx, dev_nn_idx, num_neigh_per_query * QUERY_BLOCK_SIZE * sizeof(int), cudaMemcpyDeviceToHost);
                 int pos;
