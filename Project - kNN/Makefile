@@ -8,11 +8,14 @@ HIGH ?= 2
 
 CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -g -O3 -march=native
 CFLAGS += -DSURROGATES -Wall
+
 NVCCFLAGS = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -O3 --gpu-architecture=sm_35
 NVCCFLAGS += -allow-unsupported-compiler
+
+NVCFLAGS = -acc -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -fast -Minfo=accel
 LDFLAGS += -lm 
 
-all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda
+all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -71,7 +74,15 @@ myknn_cuda: myknn_cuda.o
 	nvcc -o myknn_cuda myknn_cuda.o
 
 myknn_cuda.o: myknn_cuda.cu
-	nvcc -DCUDA $(NVCCFLAGS) -o myknn_cuda.o -c myknn_cuda.cu
+	nvcc $(NVCCFLAGS) -o myknn_cuda.o -c myknn_cuda.cu
+
+#-------------------- OpenACC ------------------------
+myknn_acc: myknn_acc.o
+	nvc -acc -o myknn_acc myknn_acc.o
+
+myknn_acc.o: myknn_acc.c
+	nvc $(NVCFLAGS) -o myknn_acc.o -c myknn_acc.c
+######################################################
 
 clean:
-	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda
+	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc
