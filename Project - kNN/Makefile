@@ -13,6 +13,7 @@ NVCCFLAGS = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QU
 NVCCFLAGS += -allow-unsupported-compiler
 
 NVCFLAGS = -acc -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -fast -Minfo=accel
+NVCFLAGS += -ta=tesla:managed
 LDFLAGS += -lm 
 
 all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc

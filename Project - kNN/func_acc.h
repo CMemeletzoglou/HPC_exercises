@@ -72,24 +72,6 @@ double fitfun(double *x, int n)
 	return f;
 }
 
-
-/* random number generator  */
-#define SEED_RAND()     srand48(1)
-#define URAND()         drand48()
-
-#ifndef LB
-#define LB -1.0
-#endif
-#ifndef UB
-#define UB 1.0
-#endif
-
-double get_rand(int k)
-{
-	return (UB-LB)*URAND()+LB;
-}
-
-
 /* utils */
 double compute_mean(double *v, int n)
 {
@@ -109,6 +91,7 @@ double compute_var(double *v, int n, double mean)
 	return s/n;
 }
 
+#pragma acc routine
 double compute_dist(double *restrict v, double *restrict w, int n)
 {
 	int i;
@@ -121,20 +104,6 @@ double compute_dist(double *restrict v, double *restrict w, int n)
 	return sqrt(s);
 }
 
-double compute_max_pos(double *restrict v, int n, int *restrict pos)
-{
-	int i, p = 0;
-	double vmax = v[0];
-	for (i = 1; i < n; i++)
-		if (v[i] > vmax) {
-			vmax = v[i];
-			p = i;
-		}
-
-	*pos = p;
-	return vmax;
-}
-
 void extract_vectors(double *input_arr, double *output_arr, int nrows, int input_dim, int output_dim)
 {
 	for(int i = 0; i < nrows; i++)
@@ -142,19 +111,7 @@ void extract_vectors(double *input_arr, double *output_arr, int nrows, int input
 			output_arr[i * output_dim + j] = input_arr[i * input_dim + j];
 }
 
-// void compute_all_distances(double *restrict train_elems, query_t *restrict q, int query_idx, double *restrict global_nn_dist, int ntrain_vectors, int dim)			   
-// {
-// 	// for query point q, compute its distances with all training elements	
-// 	#pragma acc data present(train_elems[:TRAINELEMS * PROBDIM], q, global_nn_dist[:QUERYELEMS * TRAINELEMS])
-
-// 	#pragma acc parallel loop
-// 	for (int train_el = 0; train_el < ntrain_vectors; train_el++) // for each training element
-// 	{
-// 		global_nn_dist[query_idx * ntrain_vectors + train_el] = compute_dist(q->x, &(train_elems[train_el]), dim);
-// 	}	
-// }
-
-// #pragma acc routine seq
+#pragma acc routine seq
 double compute_min_pos(double *restrict v, int n, int *pos)
 {
 	int i, p = 0;
@@ -169,60 +126,3 @@ double compute_min_pos(double *restrict v, int n, int *pos)
 	*pos = p;
 	return vmin;
 }
-
-// void compute_knn_brute_force(query_t *restrict q, int query_idx, double *restrict global_nn_dist, double *restrict ydata, int k)
-// {
-// 	int pos;
-// 	double min_k_val;
-
-// 	for (int neigh = 0; neigh < k; neigh++)
-// 	{
-// 		min_k_val = compute_min_pos(global_nn_dist + query_idx * TRAINELEMS, TRAINELEMS, &pos);
-// 		q->nn_dist[neigh] = min_k_val;
-// 		q->nn_idx[neigh] = pos;
-// 		q->nn_val[neigh] = ydata[pos];
-
-// 		global_nn_dist[query_idx * TRAINELEMS + pos] = INF;
-// 	}
-// }
-
-// void compute_knn_brute_force(double *restrict xdata, double *restrict ydata, query_t *restrict q, int dim, int k, int global_block_offset, int block_size)
-// {									  
-// 	/* global_block_offset : block offset in terms of **training elements** (does not take into account the dimension)
-// 	 * block_size : the amount of training elements in xdata to iterate over,
-// 	 * 				starting from index (global_block_offset + mpi_block_offset)
-// 	 */
-// 	int i, gi, xdata_idx, max_i;
-// 	double max_d, new_d;
-
-// 	// find K neighbors
-// 	max_d = compute_max_pos(q->nn_dist, k, &max_i);
-	
-// 	#pragma acc loop seq
-// 	for (i = 0; i < block_size; i++) // i runs inside each training block's boundaries
-// 	{
-// 		gi = global_block_offset + i;
-
-// 		new_d = compute_dist(q->x, &(xdata[gi]), dim); // euclidean		
-// 		if (new_d < max_d) // add point to the list of knns, replace element max_i
-// 		{	
-// 			q->nn_idx[max_i] = gi;
-// 			q->nn_dist[max_i] = new_d;
-// 			q->nn_val[max_i] = ydata[gi];
-// 		}
-// 		max_d = compute_max_pos(q->nn_dist, k, &max_i);
-// 	}
-// }
-
-
-/* compute an approximation based on the values of the neighbors */
-// double predict_value(double *restrict ydata, int knn)
-// {
-// 	int i;
-// 	double sum_v = 0.0;
-// 	#pragma acc loop seq
-// 	for (i = 0; i < knn; i++)
-// 		sum_v += ydata[i];
-
-// 	return sum_v / knn;
-// }
