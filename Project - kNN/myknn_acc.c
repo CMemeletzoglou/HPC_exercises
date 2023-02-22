@@ -234,11 +234,10 @@ int main(int argc, char *argv[])
 	printf("APE = %.2f %%\n", err_sum / QUERYELEMS);
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
-
-	printf("Total time = %lf secs\n", t_sum);
-	printf("Time for 1st query = %lf secs\n", t_first);
-	printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
-	printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
+	
+	// total computing time without considering the time necessary to copyin/copyout data to/from the GPU
+	printf("Total Computing time = %lf secs\n", t_sum); 
+	printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
 
 	/* CLEANUP */
 
