@@ -8,19 +8,6 @@
 
 #define INF 1e99
 
-// struct that will preserve the k nearest neighbors for each query.
-// Will be used in order to load training data in a blocking fashion,
-// iterating over all query points. Thus for each query point we will
-// need to preserve the k nearest neighbors that have been found so far
-// in the preceding blocks.
-typedef struct query_s
-{
-        double x[PROBDIM];
-        int nn_idx[NNBS];     // The index (< TRAINELEMS) of the k nearest neighbors
-        double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
-	double nn_val[NNBS];
-} query_t;
-
 /* I/O routines */
 void store_binary_data(char *filename, double *data, int n)
 {
@@ -36,7 +23,7 @@ void store_binary_data(char *filename, double *data, int n)
 	fclose(fp);
 }
 
-void load_binary_data(const char *filename, double *data, query_t *queries, const int n)
+void load_binary_data(const char *filename, double *data, const int n)
 {
 	FILE *fp;
 	fp = fopen(filename, "rb");
@@ -48,25 +35,6 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 	size_t nelems = fread(data, sizeof(double), n, fp);
 	assert(nelems == n); // check that all elements were actually read
 	fclose(fp);
-
-	// If queries are loaded, initialize the queries structs
-	if (queries != NULL)
-	{
-		for (int i = 0; i < QUERYELEMS; i++)
-		{
-			for (int k = 0; k < PROBDIM; k++)
-				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
-
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_idx[j] = -1;
-
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_dist[j] = 1e99 - j;
-
-			for (int j = 0; j < NNBS; j++)
-				queries[i].nn_val[j] = -1;
-		}
-	}
 }
 
 /* Timer */

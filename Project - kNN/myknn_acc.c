@@ -7,9 +7,10 @@
 #ifndef PROBDIM
 #define PROBDIM 2
 #endif
+
+#define DEBUG 1
 // kernel 2 (find the 32 best neighbors for each train block) : 
 // train_block_size = 2^6  * NNBS -> 2^11          || 2^8 * NNBS -> 2^13        || 2^10 * NNBS -> 2^15          || 2^12 * NNBS -> 2^17
-
 
 // kernel 3 (find final 32 neighbors):                          
 // NUM_TRAIN_BLOCKS = 2^14 * NNBS * NNBS -> 2^24   || 2^8 * NNBS * NNBS -> 2^18 || 2^10 * NNBS * NNBS -> 2^20   || 2^8 * NNBS * NNBS -> 2^18
@@ -41,12 +42,8 @@ int main(int argc, char *argv[])
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
         
-	// assert(TRAINELEMS % TRAIN_BLOCK_SIZE == 0);
+	assert(TRAINELEMS % TRAIN_BLOCK_SIZE == 0);
 
-#if defined(DEBUG)
-	/* Create/Open an output file */
-	FILE *fpout = fopen("output.knn.txt","w");
-#endif
         int vector_size = PROBDIM + 1;
 
         double *mem = (double *)malloc(TRAINELEMS * vector_size * sizeof(double));
@@ -59,7 +56,27 @@ int main(int argc, char *argv[])
 	/* Configure and Initialize the ydata handler arrays */
 	double *query_ydata = malloc(QUERYELEMS * sizeof(double));
 
-	
+	/***************************************************************************
+	 ******************************** Device arrays ****************************
+	 ****************************************************************************/
+	double *train_vectors = (double *)malloc(TRAINELEMS * PROBDIM * sizeof(double));
+        double *query_vectors = (double *)malloc(QUERYELEMS * PROBDIM * sizeof(double));
+
+	double *global_nn_dist = (double *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(double));
+	int *global_nn_idx = (int *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(int));
+
+        int *reduced_nn_idx = (int*)malloc(QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS * sizeof(int));
+	double *reduced_nn_dist = (double *)malloc(QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS * sizeof(double));
+
+	int helper_vec_size = 0;
+	double *err_vals = NULL, *yp_vals = NULL;
+#if defined(DEBUG)
+	/* Create/Open an output file */
+	FILE *fpout = fopen("output.knn_acc.txt","w");
+	err_vals = (double *)malloc(QUERYELEMS * sizeof(double));
+	yp_vals = (double *)malloc(QUERYELEMS * sizeof(double));
+	helper_vec_size = QUERYELEMS;
+#endif
 
 	for (int i = 0; i < TRAINELEMS; i++)
 	{
@@ -79,9 +96,6 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-        double *train_vectors = (double *)malloc(TRAINELEMS * PROBDIM * sizeof(double));
-        double *query_vectors = (double *)malloc(QUERYELEMS * PROBDIM * sizeof(double));
-
         // extract pure vectors to be passed to the GPU
         extract_vectors(mem, train_vectors, TRAINELEMS, PROBDIM + 1, PROBDIM);
 	extract_vectors(query_mem, query_vectors, QUERYELEMS, PROBDIM + 1, PROBDIM);
@@ -91,24 +105,11 @@ int main(int argc, char *argv[])
 	double sse = 0.0;
 	double err, err_sum = 0.0;
 
-	/* For each training elements block, we calculate each query point's k neighbors,
-	 * using the training elements, that belong to the current training element block.
-	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
-	 */
-
-	double *global_nn_dist = (double *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(double));
-	int *global_nn_idx = (int *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(int));
-
-	// int *reduced_nn_idx = (int*)malloc(QUERY_BLOCK_SIZE * NNBS * NUM_TRAIN_BLOCKS * sizeof(int));
-	// double *reduced_nn_dist = (double *)malloc(QUERY_BLOCK_SIZE * NNBS * NUM_TRAIN_BLOCKS * sizeof(double));
-        
-        int *reduced_nn_idx = (int*)malloc(QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS * sizeof(int));
-	double *reduced_nn_dist = (double *)malloc(QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS * sizeof(double));
-
         #pragma acc data copyin(train_vectors[:TRAINELEMS * PROBDIM], query_vectors[:QUERYELEMS * PROBDIM], ydata[:TRAINELEMS], query_ydata[:QUERYELEMS]) \
 			 create(global_nn_dist[:TRAINELEMS * QUERY_BLOCK_SIZE], global_nn_idx[:TRAINELEMS * QUERY_BLOCK_SIZE]) \
 			 create(reduced_nn_dist[:QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS], reduced_nn_idx[:QUERYELEMS * NUM_TRAIN_BLOCKS * NNBS]) \
-                         copyout(sse, err_sum)
+	   		 create(err_vals[:helper_vec_size], yp_vals[:helper_vec_size]) \
+			 copyout(sse, err_sum, err_vals[:helper_vec_size], yp_vals[:helper_vec_size])
         {
 		double t_start = gettime();
 
@@ -153,12 +154,12 @@ int main(int argc, char *argv[])
                                         }
 				}
 			}                              
-                } // ends
+                } // query block loop ends here
 
                 double sum = 0.0, yp;
                 int pos;
 
-                #pragma acc parallel loop private(pos, yp) firstprivate(sum) reduction(+ : sse, err_sum)
+                #pragma acc parallel loop private(pos, yp, err) firstprivate(sum) reduction(+ : sse, err_sum)
                 for (int query_el = 0; query_el < QUERYELEMS; query_el++)
                 {
                         #pragma acc loop seq
@@ -169,17 +170,20 @@ int main(int argc, char *argv[])
                                 reduced_nn_dist[query_el * NUM_TRAIN_BLOCKS*NNBS + pos] = INF;
                         }
                         yp = sum / NNBS;
-                        sse += (query_ydata[query_el] - yp) * (query_ydata[query_el] - yp);
-                        err_sum += 100.0 * fabs((yp - query_ydata[query_el]) / query_ydata[query_el]);
-                }
-		
+			yp_vals[query_el] = yp;
+			sse += (query_ydata[query_el] - yp) * (query_ydata[query_el] - yp);
+			err = 100.0 * fabs((yp - query_ydata[query_el]) / query_ydata[query_el]);
+			err_vals[query_el] = err;
+			err_sum += err;
+		}		
 		t_sum = gettime() - t_start;
 	}
 
 
-	// #if defined(DEBUG)
-	// 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp, err);
-	// #endif
+#if defined(DEBUG)
+	for (int i = 0; i < QUERYELEMS; i++)
+		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], err_vals[i]);
+#endif
 
 	/* CALCULATE AND DISPLAY RESULTS */
 
@@ -203,19 +207,20 @@ int main(int argc, char *argv[])
 #if defined(DEBUG)
 	/* Close the output file */
 	fclose(fpout);
+	free(err_vals);
+	free(yp_vals);
 #endif
 
-	free(query_ydata);
-	free(query_mem);
-
-	free(ydata);
 	free(mem);
+	free(ydata);
+	free(query_mem);
+	free(query_ydata);
 
         free(train_vectors);
         free(query_vectors);
-	free(global_nn_idx);
-	free(global_nn_dist);
 
+	free(global_nn_dist);
+	free(global_nn_idx);
 	free(reduced_nn_idx);
 	free(reduced_nn_dist);
 
