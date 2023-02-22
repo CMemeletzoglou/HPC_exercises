@@ -421,7 +421,7 @@ void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim,
 
 /* compute an approximation based on the values of the neighbors */
 // double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
-double predict_value(int dim, int knn, double *xdata, double *ydata)
+double predict_value(double *ydata, int knn)
 {
 #if defined (SIMD)
 	// plain mean (other possible options: inverse distance weight, closest value inheritance)

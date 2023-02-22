@@ -14,8 +14,6 @@ static double *ydata;
 
 double find_knn_value(query_t *q, int knn)
 {
-	double xd[knn * PROBDIM];     // the knn neighboring points/vectors of size PROBDIM
-
 #if defined(SIMD)
 	__attribute__((aligned(32))) double fd[knn];	// function values for the knn neighbors
 #else 
@@ -25,11 +23,7 @@ double find_knn_value(query_t *q, int knn)
 	for (int i = 0; i < knn; i++)
 		fd[i] = ydata[q->nn_idx[i]];
 
-	for (int i = 0; i < knn; i++) 
-		for (int j = 0; j < PROBDIM; j++)
-			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
-
-        return predict_value(PROBDIM, knn, xd, fd);
+        return predict_value(fd, knn);
 }
 
 int main(int argc, char *argv[])
@@ -207,9 +201,6 @@ int main(int argc, char *argv[])
         // total running time (parallel blocking neighbor find + query point function value estimation calculation)
         t_total = t_end - t_start; 
 
-// *************************************************************************************
-// TODO : Try to make the file write in a parallel way (memory-mapped file (mmap etc))
-// *************************************************************************************
 #if defined(DEBUG)
 	for (int i = 0; i < QUERYELEMS; i++)
 		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], err_vals[i]);
@@ -225,10 +216,8 @@ int main(int argc, char *argv[])
 	printf("MSE = %.6f\n", mse);
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-	printf("Total time = %lf secs\n", t_total);
+	printf("Total Computing time = %lf secs\n", t_total);
 	printf("Average time/query = %lf secs\n", t_total / QUERYELEMS);
-
-
 
 #if defined(SIMD)
 	for (int i = 0; i < QUERYELEMS; i++)
