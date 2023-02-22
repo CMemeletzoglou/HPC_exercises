@@ -17,8 +17,6 @@ static double *ydata;
 // double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
 {
-	double xd[knn * PROBDIM];    // the knn neighboring points/vectors of size PROBDIM
-
 #if defined(SIMD)
 	__attribute__((aligned(32))) double fd[knn];	// function values for the knn neighbors
 #else 
@@ -27,12 +25,8 @@ double find_knn_value(query_t *q, int knn)
 
 	for (int i = 0; i < knn; i++)
 		fd[i] = q->nn_val[i];
-// TODO: Remove xd, since it is not used in predict value
-//      for (int i = 0; i < knn; i++)
-// 		for (int j = 0; j < PROBDIM; j++)
-// 			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
 
-	return predict_value(PROBDIM, knn, xd, fd);
+	return predict_value(fd, knn);
 }
 
 int main(int argc, char *argv[])
@@ -359,8 +353,7 @@ int main(int argc, char *argv[])
                 printf("MSE = %.6f\n", mse);
                 printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
-                printf("Total time = %lf secs\n", t_sum);
-                
+                printf("Total Computing time = %lf secs\n", t_sum);                
 		printf("Average time for 1st query = %lf secs\n", t_first / nprocs);
 		printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
 		printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
