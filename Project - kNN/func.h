@@ -60,9 +60,9 @@ void load_binary_data(const char *filename, double *data, query_t *queries, cons
 		{
 			for (int k = 0; k < PROBDIM; k++)
 		#if defined(SIMD)
-			queries[i].x[k] = data[i * (PROBDIM + 1) + k];
+				queries[i].x[k] = data[i * (PROBDIM + 1) + k];
 		#else
-			queries[i].x = &data[i * (PROBDIM + 1)];
+				queries[i].x = &data[i * (PROBDIM + 1)];
 		#endif
 
 			for (int j = 0; j < NNBS; j++)
@@ -229,6 +229,7 @@ double compute_var(double *v, int n, double mean)
 	return s/n;
 }
 
+
 double compute_dist(double *v, double *w, int n)
 {
 #if defined (SIMD)
@@ -290,6 +291,8 @@ double compute_dist(double *v, double *w, int n)
 	return sqrt(s);
 #endif
 }
+
+
 
 double compute_max_pos(double *v, int n, int *pos)
 {
