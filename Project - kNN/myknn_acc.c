@@ -7,8 +7,13 @@
 #ifndef PROBDIM
 #define PROBDIM 2
 #endif
+// kernel 2 (find the 32 best neighbors for each train block) : 
+// train_block_size = 2^6  * NNBS -> 2^11          || 2^8 * NNBS -> 2^13        || 2^10 * NNBS -> 2^15          || 2^12 * NNBS -> 2^17
 
-#define TRAIN_BLOCK_SIZE 64 // 2^14 -> 64 blocks
+
+// kernel 3 (find final 32 neighbors):                          
+// NUM_TRAIN_BLOCKS = 2^14 * NNBS * NNBS -> 2^24   || 2^8 * NNBS * NNBS -> 2^18 || 2^10 * NNBS * NNBS -> 2^20   || 2^8 * NNBS * NNBS -> 2^18
+#define TRAIN_BLOCK_SIZE 4096
 #define QUERY_BLOCK_SIZE 16
 
 #define NUM_TRAIN_BLOCKS (TRAINELEMS / TRAIN_BLOCK_SIZE)
@@ -91,68 +96,85 @@ int main(int argc, char *argv[])
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 */
 
-	double *global_nn_dist = (double *)malloc(TRAINELEMS * sizeof(double));
-	int *global_nn_idx = (int *)malloc(TRAINELEMS * TRAIN_BLOCK_SIZE * sizeof(int));
+	double *global_nn_dist = (double *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(double));
+	int *global_nn_idx = (int *)malloc(QUERY_BLOCK_SIZE * TRAINELEMS * sizeof(int));
 
-	int *reduced_nn_idx = (int*)malloc(NNBS * NUM_TRAIN_BLOCKS * sizeof(int));
-	double *reduced_nn_dist = (double *)malloc(NNBS * NUM_TRAIN_BLOCKS * sizeof(double));
-        
+	int *reduced_nn_idx = (int*)malloc(QUERY_BLOCK_SIZE * NNBS * NUM_TRAIN_BLOCKS * sizeof(int));
+	double *reduced_nn_dist = (double *)malloc(QUERY_BLOCK_SIZE * NNBS * NUM_TRAIN_BLOCKS * sizeof(double));
+
         #pragma acc data copyin(train_vectors[:TRAINELEMS * PROBDIM], query_vectors[:QUERYELEMS * PROBDIM], ydata[:TRAINELEMS], query_ydata[:QUERYELEMS]) \
-			 create(global_nn_dist[:TRAINELEMS], global_nn_idx[:TRAINELEMS]) \
-			 create(reduced_nn_dist[:NNBS*NUM_TRAIN_BLOCKS], reduced_nn_idx[:NNBS*NUM_TRAIN_BLOCKS]) \
+			 create(global_nn_dist[:TRAINELEMS * QUERY_BLOCK_SIZE], global_nn_idx[:TRAINELEMS * QUERY_BLOCK_SIZE]) \
+			 create(reduced_nn_dist[:NNBS * NUM_TRAIN_BLOCKS * QUERY_BLOCK_SIZE], reduced_nn_idx[:NNBS * NUM_TRAIN_BLOCKS * QUERY_BLOCK_SIZE]) \
                          copyout(sse, err_sum)
         {
 		double t_start = gettime();
 
-		for (int i = 0; i < QUERYELEMS; i++) // choose query
+		for (int query_block = 0; query_block < QUERYELEMS; query_block += QUERY_BLOCK_SIZE) // choose query
 		{	
-                        #pragma acc parallel loop collapse(2)
+		        #pragma acc parallel loop collapse(3)
 			for(int train_block = 0; train_block < TRAINELEMS; train_block += TRAIN_BLOCK_SIZE)
 			{
-				// calculate distances for the chosen query point with each training point in this block
-                                for (int train_el = 0; train_el < TRAIN_BLOCK_SIZE; train_el++)
+                                for (int query_el = 0; query_el < QUERY_BLOCK_SIZE; query_el++)
                                 {
-                                        int g_train_el_idx = train_block + train_el;
-                                        global_nn_dist[g_train_el_idx] = compute_dist(&(query_vectors[i * PROBDIM]), &(train_vectors[g_train_el_idx * PROBDIM]), PROBDIM);
-					global_nn_idx[g_train_el_idx] = g_train_el_idx;
-				}
+                                        // calculate distances for the chosen query point with each training point in this block
+                                        for (int train_el = 0; train_el < TRAIN_BLOCK_SIZE; train_el++)
+                                        {
+						int g_query_el_idx = query_block + query_el;
+                                                int g_train_el_idx = train_block + train_el;
+                                                global_nn_dist[query_el*TRAINELEMS + g_train_el_idx] = 
+                                                        compute_dist(&(query_vectors[g_query_el_idx * PROBDIM]), &(train_vectors[g_train_el_idx * PROBDIM]), PROBDIM);
+                                                global_nn_idx[query_el*TRAINELEMS + g_train_el_idx] = g_train_el_idx;
+                                        }
+                                }
 			}
-			// REDUCE
-			// This has a race condition and thus cannot be parallelized
-			
-			#pragma acc parallel loop
+
+                        // REDUCE
+                        #pragma acc parallel loop collapse(2)
 			for(int train_block = 0; train_block < TRAINELEMS; train_block += TRAIN_BLOCK_SIZE)
                         {
-                                int train_block_idx = train_block / TRAIN_BLOCK_SIZE;
-                                #pragma acc loop seq
-				for (int neigh = 0; neigh < NNBS; neigh++)
+                                for (int query_el = 0; query_el < QUERY_BLOCK_SIZE; query_el++)
 				{
-                                        int pos;
-					reduced_nn_dist[train_block_idx*NNBS + neigh] = compute_min_pos(&global_nn_dist[train_block], TRAIN_BLOCK_SIZE, &pos);
-                                        reduced_nn_idx[train_block_idx*NNBS + neigh] = train_block + pos;
-                                        global_nn_dist[train_block + pos] = INF; // the race condition
+					int g_query_el_idx = query_block + query_el;
+                                        int train_block_idx = train_block / TRAIN_BLOCK_SIZE;
+                                        #pragma acc loop seq
+                                        for (int neigh = 0; neigh < NNBS; neigh++)
+                                        {
+                                                int pos;
+                                                reduced_nn_dist[query_el*NUM_TRAIN_BLOCKS*NNBS + train_block_idx*NNBS + neigh] =						
+						 		compute_min_pos(&global_nn_dist[query_el*TRAINELEMS + train_block], TRAIN_BLOCK_SIZE, &pos);
+
+						 
+                                                reduced_nn_idx[query_el*NUM_TRAIN_BLOCKS*NNBS + train_block_idx*NNBS + neigh] =
+								train_block + pos;
+                                                
+						global_nn_dist[query_el*TRAINELEMS + train_block + pos] = INF; // the race condition
+                                        }
 				}
 			}
 			
                         // 2nd stage reduction
-                        // #pragma acc loop seq
-			#pragma acc parallel num_gangs(1) vector_length(1) present(ydata[:TRAINELEMS], reduced_nn_idx[:NNBS * NUM_TRAIN_BLOCKS], \
-											reduced_nn_dist[:NNBS * NUM_TRAIN_BLOCKS])
-                        {
-                                int pos;
-                                double sum = 0.0, yp;
+			// #pragma acc parallel num_gangs(1) vector_length(1) present(ydata[:TRAINELEMS], reduced_nn_idx[:NNBS * NUM_TRAIN_BLOCKS], \
+			// 								reduced_nn_dist[:NNBS * NUM_TRAIN_BLOCKS])
+
+                        double sum = 0.0, yp;
+                        int pos;
+                        #pragma acc parallel loop private(pos, yp) firstprivate(sum) reduction(+ : sse, err_sum)
+                        for (int query_el = 0; query_el < QUERY_BLOCK_SIZE; query_el++) 
+                        {  // for each query in the current query block, find the final 32 neighbors
+                                int g_query_el_idx = query_block + query_el;
 				#pragma acc loop seq
                                 for (int neigh = 0; neigh < NNBS; neigh++)
                                 {
-                                        compute_min_pos(reduced_nn_dist, NUM_TRAIN_BLOCKS*NNBS, &pos);
-                                        sum += ydata[reduced_nn_idx[pos]];
-                                        reduced_nn_dist[pos] = INF;
+                                        compute_min_pos(&reduced_nn_dist[query_el*NUM_TRAIN_BLOCKS*NNBS], NUM_TRAIN_BLOCKS*NNBS, &pos);
+                                        sum += ydata[reduced_nn_idx[query_el*NUM_TRAIN_BLOCKS*NNBS + pos]];
+                                        reduced_nn_dist[query_el*NUM_TRAIN_BLOCKS*NNBS + pos] = INF;
                                 }
                                 yp = sum / NNBS;
-                                sse += (query_ydata[i] - yp) * (query_ydata[i] - yp);
-                                err_sum += 100.0 * fabs((yp - query_ydata[i]) / query_ydata[i]);
+                                sse += (query_ydata[g_query_el_idx] - yp) * (query_ydata[g_query_el_idx] - yp);
+                                err_sum += 100.0 * fabs((yp - query_ydata[g_query_el_idx]) / query_ydata[g_query_el_idx]);
                         }
 		}
+		
 		t_sum = gettime() - t_start;
 	}
 
