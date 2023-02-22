@@ -89,7 +89,7 @@ int main(int argc, char *argv[])
 	extract_vectors(query_mem, query_vectors, QUERYELEMS, PROBDIM + 1, PROBDIM);
 	
 	/* COMPUTATION PART */
-	double t0, t1, t_first = 0.0, t_sum = 0.0;
+	double t_sum = 0.0;
 	double sse = 0.0;
 	double err, err_sum = 0.0;
 
