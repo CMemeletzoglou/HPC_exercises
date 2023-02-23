@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
 	int queryelems_blocksize = QUERYELEMS / nprocs;
 	int rank_in_charge;
 	
-	// we actually need an MPI_Request object per asynchronous communication call
+	// we need an MPI_Request object per asynchronous communication call
 	MPI_Request request[nprocs - 1];
 	MPI_Status status;
 
