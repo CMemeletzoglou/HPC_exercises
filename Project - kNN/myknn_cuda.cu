@@ -42,8 +42,8 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
 
 	for(int neigh = 0; neigh < k; neigh++) // all threads will participate in finding each of the k neighbors
         {
-                // Initially the buffer line for each query (indexed by threadIdx.y) ([0, QUERY_BLOCK_SIZE-1])
-                // should contain the indexes of the local training point (threadIdx.x) ([0, TRAIN_BLOCK_SIZE-1])
+                // Initially the buffer line for each query (indexed by threadIdx.y)
+                // should contain the indexes of the local training point (threadIdx.x)
                 // since the minimum distance it knows yet is the one that this thread calculated.
                 // Thus, on the left handside, we index the buffer cell that corresponds to the current thread
                 // and on the right handside we store the index of the local training point.
@@ -58,15 +58,14 @@ __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, dou
 
                 for (int j = 0; j < (int)log2f(blockDim.x); j++)
                 {
-                        next_idx = curr_idx + pow(2, j);
+                        next_idx = curr_idx + (1 << j);
                         int _next = trainel_idx_buf[next_idx];
                         int _curr = trainel_idx_buf[curr_idx];
-                        __syncthreads();
 
-                        if ((threadIdx.x % (int)pow(2, j+1)) == 0)
-                        {
+                        __syncthreads();
+                        // same as threadIdx.x % pow(2, j+1) && threadIdx.x < len, only a lot faster
+                        if (!(threadIdx.x & ((1 << (j+1)) - 1)))
                                 trainel_idx_buf[curr_idx] = (dist_vec[_curr] < dist_vec[_next]) ? _curr : _next;
-                        }
                         __syncthreads();
                 }
 
@@ -154,12 +153,6 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 	 */
 	dist_vec[local_query_idx * blockDim.x + local_trainel_idx] = 
                 	compute_dist(&query_block[local_query_idx * dim], &trainel_block[local_trainel_idx * dim], dim);
-        // printf("threadIdx.x = %d, threadIdx.y = %d | wrote at dist_vec[%d] -> %.5f\n", 
-        //                 threadIdx.x, 
-        //                 threadIdx.y, 
-        //                 local_query_idx * blockDim.x + local_trainel_idx, 
-        //                 compute_dist(&query_block[local_query_idx * dim], &trainel_block[local_trainel_idx * dim], dim));
-
 	__syncthreads();
 
         thread_block_reduction(dist_vec, global_nn_idx, global_nn_dist, k);
@@ -185,40 +178,38 @@ __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dis
 	__syncthreads();
 
         // Decide on the number of iterations required to do the reduction to len elements
-	int num_iter = log2f(len);
+	int num_iter = log2f(blockDim.x);
 
         int curr_tid = threadIdx.y * blockDim.x  + threadIdx.x;
         int next_tid, curr_el, next_el;
 	for(int neigh = 0; neigh < k; neigh++)
 	{
-                // first iteration will be performed on data twice the size of the thread block
+                // First iteration will be performed on data twice the size of the thread block
                 // so we may use all threads for this first step, we should only be careful with the indexing
                 // If the length (len) of the data we want to reduce is less than the available number of threads for
                 // each query (blockDim.x), we obviously should not perform this step
-                // if (len == 2*blockDim.x)
-                // {
-                //         curr_el = 2*curr_tid;
-                //         next_el = curr_el + 1;
-                //         local_el_idx_buf[curr_tid] = (dist_vec[curr_el] < dist_vec[next_el]) 
-                //                 		      ? curr_el
-                //                 		      : next_el;
-                //         --num_iter;
-                // }
-                // else
-                // {
-                        // printf("2\n");
+		__syncthreads();
+                if (len == 2*blockDim.x)
+                {
+                        curr_el = 2*curr_tid;
+                        next_el = curr_el + 1;
+                        local_el_idx_buf[curr_tid] = (dist_vec[curr_el] < dist_vec[next_el]) 
+                                		      ? curr_el
+                                		      : next_el;
+                }
+                else
                         local_el_idx_buf[curr_tid] = curr_tid;
-                // }
-                __syncthreads();
 
+                __syncthreads();
                 for (int j = 0; j < num_iter; j++)
                 {
-                        next_tid = curr_tid + pow(2, j);
+                        next_tid = curr_tid + (1 << j);
                         curr_el = local_el_idx_buf[curr_tid];
                         next_el = local_el_idx_buf[next_tid];
                         
                         __syncthreads();
-                        if ((threadIdx.x % (int)pow(2, j+1)) == 0 && threadIdx.x < len)
+                        // same as threadIdx.x % pow(2, j+1) && threadIdx.x < len, only a lot faster
+                        if (!(threadIdx.x & ((1 << (j+1)) - 1)) && threadIdx.x < len)
                                 local_el_idx_buf[curr_tid] = (dist_vec[curr_el] < dist_vec[next_el]) ? curr_el : next_el;
                         __syncthreads();
                 }
@@ -419,13 +410,13 @@ int main(int argc, char **argv)
                 // printf("compute_distances_kernel error code: %d\n", cudaGetLastError());
                 assert(cudaGetLastError() == 0);
 
-		num_thread_blocks = ROW_THREAD_BLOCKS * NNBS / (/* 2 * */ TRAIN_BLOCK_SIZE);
+		num_thread_blocks = ROW_THREAD_BLOCKS * NNBS / (2 * TRAIN_BLOCK_SIZE);
 
 		dim3 reduction_block_size(TRAIN_BLOCK_SIZE, QUERY_BLOCK_SIZE, 1);
 		while(1)
 		{
 			// Calculate the amount of elements in each thread block (per query)
-			len = num_thread_blocks * (/* 2 * */ TRAIN_BLOCK_SIZE) / ceil(num_thread_blocks);
+			len = num_thread_blocks * (2 * TRAIN_BLOCK_SIZE) / ceil(num_thread_blocks);
 
 			// Fix the num_thread_blocks, so if there are less than TRAIN_BLOCK_SIZE elements left
 			// you will still use 1 thread block in order to reduce them to NNBS neighbors
@@ -447,50 +438,23 @@ int main(int argc, char **argv)
 			reduce_distance_kernel<<<reduction_grid_dim, reduction_block_size, reduction_shared_mem_size>>>
 				        (dev_nn_idx, dev_nn_dist, dev_temp_nn_idx, dev_temp_nn_dist, len, NNBS, reduction_dist_vector_size);
 			// Check for any cuda errors you might be missing
-			// printf("reduce_distance_kernel error code: %d\n", cudaGetLastError());
 			assert(cudaGetLastError() == 0);
 
                         // Swap the pointers of the input and output device arrays
                         _dtemp = dev_nn_dist; dev_nn_dist = dev_temp_nn_dist; dev_temp_nn_dist = _dtemp;
                         _itemp = dev_nn_idx; dev_nn_idx = dev_temp_nn_idx; dev_temp_nn_idx = _itemp;
-                        
-			// printf("num_thread_blocks = %.1f | len = %d\n", num_thread_blocks, len);
+
 			// Update the loop-control variable
 			if (num_thread_blocks == 1)
 				break;
                         
-			num_thread_blocks = num_thread_blocks * NNBS / (/* 2 * */ block_size.x);
+			num_thread_blocks = num_thread_blocks * NNBS / (2 * block_size.x);
 		}
 
 		// Find yp for each query and error metrics
 		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_sse, dev_err);
 		// Check for any cuda errors you might be missing
 		assert(cudaGetLastError() == 0);
-
-                // int num_neigh_per_query = num_thread_blocks * NNBS /* ROW_THREAD_BLOCKS * NNBS */;
-		// cudaMemcpy(temp_dist, dev_nn_dist, num_neigh_per_query * QUERY_BLOCK_SIZE * sizeof(double), cudaMemcpyDeviceToHost);
-		// cudaMemcpy(temp_idx, dev_nn_idx, num_neigh_per_query * QUERY_BLOCK_SIZE * sizeof(int), cudaMemcpyDeviceToHost);
-                // int pos;
-		// double yp = 0;
-                // double sum = 0.0;
-                // double dist;
-		// for (int q = 0; q < QUERY_BLOCK_SIZE; q++) // for each dist matrix row
-                // {
-                //         sum = 0;
-		// 	for (int neigh = 0; neigh < NNBS; neigh++) // find all neighbors
-		// 	{
-                //                 // dist = compute_min_pos(&temp_dist[q*num_neigh_per_query], num_neigh_per_query, &pos);
-		// 		// temp_dist[q*(num_neigh_per_query) + pos] = INF;
-		// 		// sum += ydata[temp_idx[q*(num_neigh_per_query) + pos]];
-		// 		sum += ydata[temp_idx[q*(num_neigh_per_query) + neigh]];
-		// 	}
-                        
-                //         yp = sum / NNBS;
-		// 	// printf("Found : %.5f, expected : %.5f\n", yp, query_ydata[i + q]);
-		// 	sse += (query_ydata[i + q] - yp) * (query_ydata[i + q] - yp);
-		// 	// printf("sse = %.5f\n", sse);
-                //         err_sum += 100.0 * fabs((yp - query_ydata[i + q]) / query_ydata[i + q]);
-                // }
 	}
 
 	// sync device and host before getting final time
@@ -518,9 +482,7 @@ int main(int argc, char **argv)
 	printf("R2 = 1 - (MSE/Var) = %.6lf\n", r2);
 
 	printf("Total time = %lf secs\n", t_sum);
-	// printf("Time for 1st query = %lf secs\n", t_first);
-	// printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
-	// printf("Average time/query = %lf secs\n", (t_sum - t_first) / (QUERYELEMS - 1));
+	printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
 
 	/* CLEANUP */
 
