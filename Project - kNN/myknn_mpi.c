@@ -10,11 +10,9 @@
 #define PROBDIM 2
 #endif
 
-// TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double *ydata;
 
-// double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
 {
 #if defined(SIMD)
@@ -22,7 +20,6 @@ double find_knn_value(query_t *q, int knn)
 #else 
 	double fd[knn];
 #endif	
-
 	for (int i = 0; i < knn; i++)
 		fd[i] = q->nn_val[i];
 
@@ -39,7 +36,6 @@ int main(int argc, char *argv[])
 	}
 	char *trainfile = argv[1];
 	char *queryfile = argv[2];
-
 
         // MPI Init
         int rank, nprocs;
@@ -121,16 +117,6 @@ int main(int argc, char *argv[])
 #endif
 	}
 
-	/* DECIDE ON SIZE OF IN-RANK BLOCK */
-	// TODO: Think about last rank, which may have more local training elements, the assert may not succeed
-	//       you probably only need to correct the last iteration (?)
-	// int L1d_size, train_block_size = 1;
-	// get_L1d_size(&L1d_size); // get L1d cache size
-	// // calculate the appropriate train block size as the previous power of 2
-	// if(L1d_size > 0)
-	// 	train_block_size = pow(2, floor(log2((L1d_size * 1000) / (PROBDIM * sizeof(double)))));
-	// assert(local_ntrainelems % train_block_size == 0);
-
 	/* COMPUTATION PART */
 	double t0, t1, t2 = 0.0, t_first = 0.0, t_sum = 0.0;
 	double sse = 0.0;
@@ -149,11 +135,8 @@ int main(int argc, char *argv[])
 	if (rank == nprocs - 1)
 		last_query = QUERYELEMS - 1;
 	
-        /* Configure the Derived Datatype for the query_t struct */
-        // https://mpi.deino.net/mpi_functions/MPI_Type_create_struct.html
-        // https://stackoverflow.com/questions/33618937/trouble-understanding-mpi-type-create-struct
-
-	/* Each query_t object contains: 
+        /* Configure the Derived Datatype for the query_t struct 
+	 * Each query_t object contains: 
 	 * - a pointer to a double vector of size PROBDIM (we don't need to send this vector, 
 	 *   so don't account its size)
 	 * - an integer array of size NNBS -> size_int_arr
@@ -193,7 +176,6 @@ int main(int argc, char *argv[])
 
 	// (a) and (b) Calculate and send the k neighbors found in the training block for **all** query points.
 
-	// TODO: one more loop here for the case of "cache blocking"
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
                 if (i == first_query)
@@ -213,16 +195,7 @@ int main(int argc, char *argv[])
         t2 = gettime();
 	for (int i = first_query; i <= last_query; i++)
 	{
-		/* (c) Gather the collections of k nearest neighbors sent by the other ranks.
-                 * TODO(?): Make the Recvs async, once you receive a collection (for any query you are in charge of)
-                 *          reduce_in_struct immediately.
-                 * Discussion about callback function on an async request: 
-                 * https://stackoverflow.com/questions/49763675/is-it-possible-to-attach-a-callback-to-be-executed-on-a-request-completion
-                 *
-                 * NOTE: Is all this "query blocking" even worth it in order to reduce communication delays?
-                 * I think it is since you are not sending all training data to all ranks, only a block of them. Thus you need at some point to reduce the knns
-                 * and certainly you want to avoid collecting all data at the root rank and performing the reduction there in a serial fashion.
-		 */ 
+		// (c) Gather the collections of k nearest neighbors sent by the other ranks. 
 		rcv_buf_offset = 0;
 		for (int j = 0; j < nprocs; j++)
 		{

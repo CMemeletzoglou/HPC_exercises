@@ -19,7 +19,6 @@ double find_knn_value(query_t *q, int knn)
 #else 
 	double fd[knn];
 #endif	
-
 	for (int i = 0; i < knn; i++)
 		fd[i] = ydata[q->nn_idx[i]];
 
