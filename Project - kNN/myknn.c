@@ -8,38 +8,20 @@
 #define PROBDIM 2
 #endif
 
-// My L1d = 192 KiB, and I want to cache the maximum amount of training points.
-// Each training point has a size of: PROBDIM * sizeof(double) = 16 * 8 = 128 bytes.
-// Thus, in L1d I may preserve in L1d cache 192,000 / 128 = 1,500 training points simultaneously.
-// I also need to be able to store in cache the query point aswell (!!)
-// and have a block size that will evenly devide TRAINELEMS.
-// The easy solution is to get the max power of 2 that is less that 1,500,
-// since TRAINELEMS is also a power of 2.
-// #define train_block_size 128
-
-// TODO : maybe allocate these inside main and pass them as args to find_knn_value (?)
 static double **xdata;
 static double *ydata;
 
-// double find_knn_value(double *p, int n, int knn)
 double find_knn_value(query_t *q, int knn)
 {
-	double xd[knn * PROBDIM];    // the knn neighboring points/vectors of size PROBDIM
-
 #if defined(SIMD)
 	__attribute__((aligned(32))) double fd[knn];	// function values for the knn neighbors
 #else 
 	double fd[knn];
 #endif	
-
 	for (int i = 0; i < knn; i++)
 		fd[i] = ydata[q->nn_idx[i]];
 
-	for (int i = 0; i < knn; i++) 
-		for (int j = 0; j < PROBDIM; j++)
-			xd[i * PROBDIM + j] = xdata[q->nn_idx[i]][j];
-
-	return predict_value(PROBDIM, knn, xd, fd);
+	return predict_value(fd, knn);
 }
 
 int main(int argc, char *argv[])

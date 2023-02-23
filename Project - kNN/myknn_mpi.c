@@ -47,11 +47,6 @@ int main(int argc, char *argv[])
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
         MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-#if defined(SIMD)
-        if (rank == 0)
-	        printf("Running with SIMD\n");
-#endif 
-        
         int vector_size = PROBDIM + 1;
         int local_ntrainelems = TRAINELEMS / nprocs;
         int trainelem_offset = rank * local_ntrainelems * vector_size;

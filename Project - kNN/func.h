@@ -18,10 +18,9 @@
 // in the preceding blocks.
 typedef struct query_s
 {
-	// __attribute__((aligned(32))) double x[PROBDIM]; // Query's coordinate
-	double *x;
-	int nn_idx[NNBS]; // The index (< TRAINELEMS) of the k nearest neighbors
-	double nn_dist[NNBS]; // The distance between the query point and each one of the k nearest neighbors
+	double *x; 		// Query's coordinate
+	int nn_idx[NNBS]; 	// The index (< TRAINELEMS) of the k nearest neighbors
+	double nn_dist[NNBS]; 	// The distance between the query point and each one of the k nearest neighbors
 	double nn_val[NNBS];
 } query_t;
 
@@ -292,8 +291,6 @@ double compute_dist(double *v, double *w, int n)
 #endif
 }
 
-
-
 double compute_max_pos(double *v, int n, int *pos)
 {
 	int i, p = 0;
@@ -423,7 +420,6 @@ void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim,
 
 
 /* compute an approximation based on the values of the neighbors */
-// double predict_value(int dim, int knn, double *xdata, double *ydata, double *point, double *dist)
 double predict_value(double *ydata, int knn)
 {
 #if defined (SIMD)
