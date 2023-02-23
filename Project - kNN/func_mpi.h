@@ -75,8 +75,6 @@ void store_binary_data_mpi(const char *filename, double *data, const int N, int 
         MPI_File_close(&f); 
 }
 
-// TODO: Check if inline is useful or even helpfull
-// https://stackoverflow.com/questions/1932311/when-to-use-the-inline-function-and-when-not-to-use-it
 int get_rank_in_charge_of(int query_idx, int query_blocksize, int mpi_comm_size)
 {
 	int rank = query_idx / query_blocksize;
@@ -104,7 +102,6 @@ void reduce_in_struct(query_t *query, query_t *received, int received_size)
 
 	for (int i = 0; i < received_size; i++)
 	{
-		// TODO: Find a better way to calculate the k nearest neighbors
 		max_idx = get_max_dist_neighbor(query->nn_dist, NNBS);
 		for (int j = 0; j < NNBS; j++)
 		{

@@ -141,7 +141,6 @@ int main(int argc, char *argv[])
 	 *   so don't account its size)
 	 * - an integer array of size NNBS -> size_int_arr
 	 * - two double arrays of size NNBS -> 2 * size_double_arr .
-	 * Therefore, the total buffer size is equal to :
 	 */
 	MPI_Datatype mpi_query_t;                                 // The name of the Derived Datatype
         MPI_Datatype type[3] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE}; // The MPI_Datatype of each struct member
@@ -157,18 +156,18 @@ int main(int argc, char *argv[])
 
 	// Need enough space to store all query_t structs sent by every other rank.
 	query_t *rcv_buf = (query_t *)malloc((nprocs - 1) * sizeof(query_t));
-
+	
 	int global_block_offset = rank * local_ntrainelems;
 	/* Each rank is responsible for calculating the k neighbors of each query point,
 	 * using only the training elements block it has been assigned. The block's boundaries are defined as:
-	 * start = rank * local_ntrainelems * vector_size (i.e. global_train_offset) // NOT entirely correct...
+	 * start = rank * local_ntrainelems * vector_size (i.e. global_train_offset) 
 	 * end = (rank + 1) * local_ntrainelems * vector_size .
 	 * The calculation of each query point's neighbors, occurs inside compute_knn_brute_force.
 	 *
-	 * Within each block, each rank is responsible for :
+	 * Within each Training Elemet block, each rank is responsible for :
 	 * a) Calculating the k neighbors of **all** query points
 	 * b) Sending each query that it is not responsible for, to the correct rank.
-	 * c) Gathering collections of k neighbors for the subset of query points defined by [query_chunk_start, query_chunk_end].
+	 * c) Gathering collections of k neighbors for the subset of query points defined by [start, end].
 	 *    These collections are calculated (step a) and sent (step b) by the other ranks (i.e. from other training elements blocks).
 	 * d) Calculating the final k nearest neighbors, using the collections gathered at step (c). (reduction)
 	 */
@@ -228,13 +227,10 @@ int main(int argc, char *argv[])
 	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
 	int local_idx = 0;
 #else
-        /* We only care about current err and yp. err will be accumulated in err_sum, thus we do not need a helper variable.
-         * On the other hand yp will be used to calculate the err and sse and thus in next iteration may be overwritten.
-	 */
-	double yp;
+	double yp; // if not in DEBUG mode, we only care about the value of yp
 #endif
         /* Calculate yp and the errors/metrics for all queries under the rank's responsibility
-         * Should preserve the values in DEBUG mode.
+         * We must preserve the calculated values and error metrics, when we are in DEBUG mode.
 	 */
 	for (int i = first_query; i <= last_query; i++)
 	{
@@ -331,7 +327,7 @@ int main(int argc, char *argv[])
         // MPI_Reduce does not guarantee that a non-root process will not reach here
         // while the root process is still Receiving the messages.
         // Thus I need to wait for all messages to be received. A better way would probably be to wait on the requests
-        // https://stackoverflow.com/questions/8596774/is-open-mpis-reduce-syncrhonized
+        // (https://stackoverflow.com/questions/8596774/is-open-mpis-reduce-syncrhonized)
         MPI_Barrier(MPI_COMM_WORLD);
 #if defined(DEBUG)
 	MPI_File_close(&f);
