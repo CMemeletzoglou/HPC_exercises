@@ -77,10 +77,10 @@ int main(int argc, char *argv[])
 	 */
 	xdata = (double **)malloc(local_ntrainelems * sizeof(double*));
         
-        // read a part of training data
+        // read a **part** of training data
         load_binary_data_mpi(trainfile, mem, NULL, trainelems_chunk, trainelem_offset);
 
-        // read all of the query data
+        // read **all** of the query data
         load_binary_data_mpi(queryfile, query_mem, queries, QUERYELEMS * vector_size, 0);        
 
 #if defined(SIMD)
@@ -139,8 +139,8 @@ int main(int argc, char *argv[])
 	 * Each query_t object contains: 
 	 * - a pointer to a double vector of size PROBDIM (we don't need to send this vector, 
 	 *   so don't account its size)
-	 * - an integer array of size NNBS -> size_int_arr
-	 * - two double arrays of size NNBS -> 2 * size_double_arr .
+	 * - an integer array of size NNBS 
+	 * - two double arrays of size NNBS
 	 */
 	MPI_Datatype mpi_query_t;                                 // The name of the Derived Datatype
         MPI_Datatype type[3] = {MPI_INT, MPI_DOUBLE, MPI_DOUBLE}; // The MPI_Datatype of each struct member
@@ -224,7 +224,7 @@ int main(int argc, char *argv[])
         MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_WRONLY | MPI_MODE_CREATE, MPI_INFO_NULL, &f);
         MPI_File_get_position(f, &base);
 
-	double yp[last_query - first_query + 1], err[last_query - first_query + 1];
+	double yp[last_query - first_query + 1], err[last_query - first_query + 1]; // rank-local helper arrays
 	int local_idx = 0;
 #else
 	double yp; // if not in DEBUG mode, we only care about the value of yp
@@ -269,7 +269,7 @@ int main(int argc, char *argv[])
         for (int i = first_query; i <= last_query; i++)
         {
                 local_idx = i - first_query; // "convert" global query index to buf-bound local index
-		/* We use snprintf to store the string representation of 3 double values.
+		/* We, then, use snprintf to store the string representation of 3 double values.
 		 * However, when snprintf writes the "%.5f %.5f %.2f\n" string, after the newline character,
 		 * it places the NULL string terminating character, '\0'.
 		 * However, since the output file is a text file, we don't want that character to be visible.
