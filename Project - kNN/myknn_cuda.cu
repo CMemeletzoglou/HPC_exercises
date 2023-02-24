@@ -18,7 +18,6 @@
  * copyout those arrays to host, reduce them to the desired metrics and exit.
  */
 
-// TODO : Generalize this
 // number of rows (in the overall matrix) to calculate in parallel
 #define QUERY_BLOCK_SIZE 		16
 
@@ -137,17 +136,6 @@ __global__ void compute_distances_kernel(double *mem, double *query_mem, int que
 
 	// each thread computes the distance for its query point with its training element
 	// then it updates its respective position in the distances vector
-
-	/* __CHANGE__: Prior to this change each thread called compute_dist with
-	 * &query_block[local_query_idx] and &trainel_block[local_trainel_idx],
-	 * which is WRONG.
-	 * For example, ff a thread needs to compute the distance of query point 1 and
-	 * training element 1, we must not index the respective shared memory arrays,
-	 * using 1, because those arrays are 1D arrays whose elements are doubles,
-	 * but we must think of them as **"vectors" of size dim**.
-	 * So, when a thread needs the training element "1" it does not need
-	 * trainel_block[1] but trainel_block[1*dim], to skip the previous vector(s).
-	 */
 	dist_vec[local_query_idx * blockDim.x + local_trainel_idx] = 
                 	compute_dist(&query_block[local_query_idx * dim], &trainel_block[local_trainel_idx * dim], dim);
 	__syncthreads();
@@ -226,7 +214,6 @@ __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata,
         double sum = 0.0;
         double yp;
 
-	// if(tid <)
 	int tid = threadIdx.x; // running with a 1D Thread Block
         int query_idx = tid;
         int g_query_idx = query_block_start + query_idx;
@@ -238,9 +225,9 @@ __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata,
 	yp = sum / k;
 
 #if defined(DEBUG)
-	dev_yp_vals[g_query_idx] = yp;
+	dev_yp_vals[g_query_idx] = yp; // write the computed value to the global helper array, if in DEBUG mode
 #endif
-	// Compute error metrics
+	// Compute error metrics. The dev_sser and dev_err arrays, will be copied-out to the CPU, who will reduce their values
 	dev_sse[g_query_idx] = (dev_query_ydata[g_query_idx] - yp) * (dev_query_ydata[g_query_idx] - yp);
         dev_err[g_query_idx] = 100.0 * fabs((yp - dev_query_ydata[g_query_idx]) / dev_query_ydata[g_query_idx]);
 }
@@ -300,9 +287,7 @@ int main(int argc, char **argv)
 	load_binary_data(queryfile, query_mem, QUERYELEMS * vector_size);
 
 	extract_vectors(mem, train_buf, TRAINELEMS, PROBDIM + 1, PROBDIM);
-
 	// construct a "pure" query elements array to pass to the device
-        // TODO: Have the same in/out buffer -> overwriting
 	extract_vectors(query_mem, query_buf, QUERYELEMS, PROBDIM + 1, PROBDIM);
 
 	// ******************************************************************
@@ -351,7 +336,6 @@ int main(int argc, char **argv)
 	// ************************** Host data init ************************
 	// ******************************************************************
         // init all data on CPU **Then** send them to GPU
-
 	for (int i = 0; i < TRAINELEMS; i++) // init training elements' surrogate values
 	{
 #if defined(SURROGATES)
@@ -409,8 +393,7 @@ int main(int argc, char **argv)
 	{
         	compute_distances_kernel<<<grid_dim, block_size, shared_mem_size>>>(dev_mem, dev_query_mem, i, 
 		 					dev_nn_idx, dev_nn_dist, NNBS, PROBDIM, trainel_block_size, queryel_block_size);  // compute a "chunk" of rows
-                // Check for any cuda errors you might be missing
-                // printf("compute_distances_kernel error code: %d\n", cudaGetLastError());
+                // Check for any cuda errors from the above kernel call
                 assert(cudaGetLastError() == 0);
 
 		num_thread_blocks = ROW_THREAD_BLOCKS * NNBS / (2 * TRAIN_BLOCK_SIZE);
@@ -426,7 +409,6 @@ int main(int argc, char **argv)
 			num_thread_blocks = ceil(num_thread_blocks);
 
 			// Calculate the number of thread blocks required
-			// TODO: What if on the first iteration len <= NNBS
 			dim3 reduction_grid_dim(num_thread_blocks, 1, 1);
 
 			// For each query we will load in the shared memory 2*TRAIN_BLOCK_SIZE nearest neighbors (i.e. their distances and idx)
@@ -440,7 +422,7 @@ int main(int argc, char **argv)
 
 			reduce_distance_kernel<<<reduction_grid_dim, reduction_block_size, reduction_shared_mem_size>>>
 				        (dev_nn_idx, dev_nn_dist, dev_temp_nn_idx, dev_temp_nn_dist, len, NNBS, reduction_dist_vector_size);
-			// Check for any cuda errors you might be missing
+			// Check for any cuda errors from the above kernel call
 			assert(cudaGetLastError() == 0);
 
                         // Swap the pointers of the input and output device arrays
@@ -456,7 +438,7 @@ int main(int argc, char **argv)
 
 		// Find yp for each query and error metrics
 		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_yp_vals, dev_sse, dev_err);
-		// Check for any cuda errors you might be missing
+		// Check for any cuda errors from the above kernel call
 		assert(cudaGetLastError() == 0);
 	}
 
