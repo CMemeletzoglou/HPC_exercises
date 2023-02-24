@@ -2,7 +2,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
-// #include "func.h"
 #include "func_cuda.h"
 
 #ifndef PROBDIM
@@ -10,7 +9,6 @@
 #endif
 
 #define INF 1e99
-
 /* IDEA : Calculate a matrix of size [QUERYELEMS, TRAINELEMS] where the element [i,j] is the
  * distance between the i-th query point and the j-th training point. Since this is a lightweight
  * task, it may be assigned to a device thread. 
@@ -35,7 +33,6 @@
 __device__ void thread_block_reduction(double *dist_vec, int *global_nn_idx, double *global_nn_dist, int k)
 {	
         __shared__ int trainel_idx_buf[QUERY_BLOCK_SIZE * TRAIN_BLOCK_SIZE];
-        double next_dist;
 
         int curr_idx = threadIdx.y * blockDim.x + threadIdx.x;
         int next_idx;
@@ -223,7 +220,8 @@ __global__ void reduce_distance_kernel(int *global_nn_idx, double *global_nn_dis
 	}
 }
 
-__global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block_start, int k, double *dev_sse, double *dev_err)
+__global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata, int *dev_nn_idx, int query_block_start, 
+				     int k, double *dev_yp_vals, double *dev_sse, double *dev_err)
 {
         double sum = 0.0;
         double yp;
@@ -239,6 +237,9 @@ __global__ void predict_query_values(double *dev_ydata, double *dev_query_ydata,
 	// Predict the value
 	yp = sum / k;
 
+#if defined(DEBUG)
+	dev_yp_vals[g_query_idx] = yp;
+#endif
 	// Compute error metrics
 	dev_sse[g_query_idx] = (dev_query_ydata[g_query_idx] - yp) * (dev_query_ydata[g_query_idx] - yp);
         dev_err[g_query_idx] = 100.0 * fabs((yp - dev_query_ydata[g_query_idx]) / dev_query_ydata[g_query_idx]);
@@ -265,13 +266,13 @@ int main(int argc, char **argv)
 
 #if defined(DEBUG)
         /* Create/Open an output file */
-        FILE *fpout = fopen("output.knn.txt","w");
+        FILE *fpout = fopen("output.knn_cuda.txt","w");
 #endif
         int vector_size = PROBDIM + 1;
 	double *dev_mem, *dev_ydata, *dev_query_ydata, *dev_query_mem, *dev_nn_dist, *dev_temp_nn_dist, *dev_sse, *dev_err;
+	double *dev_yp_vals = NULL;
 	int *dev_nn_idx, *dev_temp_nn_idx;
 
-	
 	// ******************************************************************
 	// ************************** Host mallocs **************************
 	// ******************************************************************
@@ -288,6 +289,9 @@ int main(int argc, char **argv)
         double *temp_dist = (double*)malloc((TRAINELEMS) * QUERY_BLOCK_SIZE * sizeof(double));
         int *temp_idx = (int*)malloc((TRAINELEMS) * QUERY_BLOCK_SIZE * sizeof(int));
 
+#if defined(DEBUG)
+	double *yp_vals = (double*)malloc(QUERYELEMS * sizeof(double));
+#endif
 
 	// ******************************************************************
 	// ************************** Load Data *****************************
@@ -300,7 +304,6 @@ int main(int argc, char **argv)
 	// construct a "pure" query elements array to pass to the device
         // TODO: Have the same in/out buffer -> overwriting
 	extract_vectors(query_mem, query_buf, QUERYELEMS, PROBDIM + 1, PROBDIM);
-
 
 	// ******************************************************************
 	// ************************** Device mallocs ************************
@@ -337,9 +340,12 @@ int main(int argc, char **argv)
 	cudaMalloc((void **)&dev_sse, QUERYELEMS * sizeof(double));
 	cudaMalloc((void **)&dev_err, QUERYELEMS * sizeof(double));
 
+#if defined(DEBUG)
+	cudaMalloc((void **)&dev_yp_vals, QUERYELEMS * sizeof(double));
+#endif
+
 	cudaMemset(dev_sse, 0, QUERYELEMS * sizeof(double));
 	cudaMemset(dev_err, 0, QUERYELEMS * sizeof(double));
-
 
 	// ******************************************************************
 	// ************************** Host data init ************************
@@ -363,7 +369,6 @@ int main(int argc, char **argv)
 		query_ydata[i] = 0;
 #endif
 	}
-
 
 	// ***************************************************************************
 	// ************************** Copyin data to device **************************
@@ -389,8 +394,6 @@ int main(int argc, char **argv)
 	 *   - a queryel_block -> QUERY_BLOCK_SIZE * PROBDIM * sizeof(double)
 	 *   - a dist_vector -> QUERY_BLOCK_SIZE * TRAIN_BLOCK_SIZE * sizeof(double)
 	 */
-
-
 	assert(block_size.x % 2 == 0);
 
 	float num_thread_blocks;
@@ -452,7 +455,7 @@ int main(int argc, char **argv)
 		}
 
 		// Find yp for each query and error metrics
-		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_sse, dev_err);
+		predict_query_values<<<1, QUERY_BLOCK_SIZE>>>(dev_ydata, dev_query_ydata, dev_nn_idx, i, NNBS, dev_yp_vals, dev_sse, dev_err);
 		// Check for any cuda errors you might be missing
 		assert(cudaGetLastError() == 0);
 	}
@@ -484,11 +487,20 @@ int main(int argc, char **argv)
 	printf("Total time = %lf secs\n", t_sum);
 	printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
 
+#if defined(DEBUG)
+	cudaMemcpy(yp_vals, dev_yp_vals, QUERYELEMS * sizeof(double), cudaMemcpyDeviceToHost);
+
+	for (int i = 0; i < QUERYELEMS; i++)
+		fprintf(fpout,"%.5f %.5f %.2f\n", query_ydata[i], yp_vals[i], buf[i]);
+#endif
+
 	/* CLEANUP */
 
 #if defined(DEBUG)
 	/* Close the output file */
 	fclose(fpout);
+	free(yp_vals);
+	cudaFree(dev_yp_vals);
 #endif
 
 	free(mem);
