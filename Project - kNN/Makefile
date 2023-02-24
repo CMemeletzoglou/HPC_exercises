@@ -10,6 +10,7 @@ CFLAGS  = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE)
 CFLAGS += -DSURROGATES -Wall
 
 NVCCFLAGS = -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -O3 --gpu-architecture=sm_35
+# change to --gpu-architecture=sm_70 for the Volta V100 GPU
 
 NVCFLAGS = -acc -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=$(QUE) -DLB=$(LOW) -DUB=$(HIGH) -DSURROGATES -g -fast -Minfo=accel
 NVCFLAGS += -ta=tesla:managed
