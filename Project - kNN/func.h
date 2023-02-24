@@ -396,26 +396,6 @@ void compute_knn_brute_force(double **xdata, double *ydata, query_t *q, int dim,
 		}
 		max_d = compute_max_pos(q->nn_dist, k, &max_i);
 	}
-
-	/* sort the knn list */ // bubble sort
-	// int temp_x, j;
-	// double temp_d;
-	// for (i = (knn - 1); i > 0; i--)
-	// {
-	// 	for (j = 1; j <= i; j++)
-	// 	{
-	// 		if (nn_dist[j-1] > nn_dist[j])
-	// 		{
-	// 			temp_d = nn_dist[j-1];
-	// 			nn_dist[j-1] = nn_dist[j];
-	// 			nn_dist[j] = temp_d;
-				
-	// 			temp_x = nn_x[j-1];
-	// 			nn_x[j-1] = nn_x[j];
-	// 			nn_x[j] = temp_x;
-	// 		}
-	// 	}
-	// }
 }
 
 

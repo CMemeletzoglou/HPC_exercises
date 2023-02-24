@@ -11,19 +11,6 @@
 static double **xdata;
 static double *ydata;
 
-double find_knn_value(query_t *q, int knn)
-{
-#if defined(SIMD)
-	__attribute__((aligned(32))) double fd[knn];	// function values for the knn neighbors
-#else 
-	double fd[knn];
-#endif	
-	for (int i = 0; i < knn; i++)
-		fd[i] = ydata[q->nn_idx[i]];
-
-	return predict_value(fd, knn);
-}
-
 int main(int argc, char *argv[])
 {
 	/* Load all data from files in memory */
@@ -138,7 +125,7 @@ int main(int argc, char *argv[])
 	for (int i = 0; i < QUERYELEMS; i++)
 	{
 		t0 = gettime();
-		double yp = find_knn_value(&(queries[i]), NNBS);
+		double yp = predict_value(queries[i].nn_val, NNBS);
 		t1 = gettime();
 		t_sum += t1 - t0;
 		if (i == 0)
