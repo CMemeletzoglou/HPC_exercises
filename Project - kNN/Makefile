@@ -16,6 +16,9 @@ NVCFLAGS = -acc -DPROBDIM=$(DIM) -DNNBS=$(KNN) -DTRAINELEMS=$(TRA) -DQUERYELEMS=
 NVCFLAGS += -ta=tesla:managed
 LDFLAGS += -lm 
 
+# Remember to set OMP_PROC_BIND to TRUE, using 'export OMP_PROC_BIND=TRUE', before executin then OpenMP version
+# in order to activate thread pining/binding.
+
 all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc
 
 gendata: gendata.o
