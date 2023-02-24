@@ -19,7 +19,7 @@ LDFLAGS += -lm
 # Remember to set OMP_PROC_BIND to TRUE, using 'export OMP_PROC_BIND=TRUE', before executin then OpenMP version
 # in order to activate thread pining/binding.
 
-all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc
+all: gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_packed myknn_mpi_simd myknn_mpi_packed_simd myknn_cuda myknn_acc
 
 gendata: gendata.o
 	gcc -o gendata gendata.o $(LDFLAGS)
@@ -71,6 +71,20 @@ myknn_mpi_simd: myknn_mpi_simd.o
 
 myknn_mpi_simd.o: myknn_mpi.c
 	mpicc -DMPI -DSIMD -mavx $(CFLAGS) -o myknn_mpi_simd.o -c myknn_mpi.c
+
+#-------------------- MPI Packed version -------------
+myknn_mpi_packed: myknn_mpi_packed.o
+	mpicc -o myknn_mpi_packed myknn_mpi_packed.o $(LDFLAGS)
+
+myknn_mpi_packed.o: myknn_mpi_packed.c
+	mpicc -DMPI $(CFLAGS) -c myknn_mpi_packed.c
+
+#-------------------- MPI Packed + SIMD version ------
+myknn_mpi_packed_simd: myknn_mpi_packed_simd.o
+	mpicc -o myknn_mpi_packed_simd myknn_mpi_packed_simd.o $(LDFLAGS)
+
+myknn_mpi_packed_simd.o: myknn_mpi_packed.c
+	mpicc -DMPI -DSIMD -mavx $(CFLAGS) -o myknn_mpi_packed_simd.o -c myknn_mpi_packed.c
 ######################################################
 	
 #-------------------- CUDA ---------------------------
@@ -89,4 +103,4 @@ myknn_acc.o: myknn_acc.c
 ######################################################
 
 clean:
-	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_simd myknn_cuda myknn_acc
+	rm -f myknn *.o gendata myknn myknn_simd myknn_omp myknn_omp_simd myknn_mpi myknn_mpi_packed myknn_mpi_simd myknn_mpi_packed_simd myknn_cuda myknn_acc
