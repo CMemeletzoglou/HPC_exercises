@@ -8,11 +8,6 @@
 #define PROBDIM 2
 #endif
 
-// kernel 2 (find the 32 best neighbors for each train block) : 
-// train_block_size = 2^6  * NNBS -> 2^11          || 2^8 * NNBS -> 2^13        || 2^10 * NNBS -> 2^15          || 2^12 * NNBS -> 2^17
-
-// kernel 3 (find final 32 neighbors):                          
-// NUM_TRAIN_BLOCKS = 2^14 * NNBS * NNBS -> 2^24   || 2^8 * NNBS * NNBS -> 2^18 || 2^10 * NNBS * NNBS -> 2^20   || 2^8 * NNBS * NNBS -> 2^18
 #define TRAIN_BLOCK_SIZE 8192
 #define QUERY_BLOCK_SIZE 64
 

@@ -306,10 +306,6 @@ int main(int argc, char **argv)
 	 * since we will later reduce the k*ROW_THREAD_BLOCKS nearest neighbors to the final k for each query point.
 	 */
 	
-        // TODO: Since all the initial calculations for the distances between
-        //       each query and each training element is temporarily stored in the shared memory of each thread block
-        //       and then before updating the arrays below, we reduce to 32 neighbors, we may only allocate
-        //       ROW_THREAD_BLOCKS * QUERY_BLOCK_SIZE * NNBS
 	cudaMalloc((void**)&dev_nn_dist, TRAINELEMS * QUERY_BLOCK_SIZE * sizeof(double));
 	cudaMalloc((void**)&dev_nn_idx, TRAINELEMS * QUERY_BLOCK_SIZE * sizeof(int));
 

@@ -140,7 +140,6 @@ void extract_vectors(double *input_arr, double *output_arr, int nrows, int input
 }
 
 /* compute an approximation based on the values of the neighbors */
-// __inline__ __device__ double predict_value(double *ydata, int knn)
 __device__ double predict_value(double *ydata, int knn)
 {
 	int i;

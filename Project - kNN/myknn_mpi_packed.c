@@ -325,8 +325,6 @@ int main(int argc, char *argv[])
 
                 printf("Total time = %lf secs\n", t_sum);
                 
-		// TODO: Print average time of first query per block
-		// OR maybe we should print the time for the "longest" first query, i.e. MPI_MAX reduction on t_first instead of MPI_SUM
 		printf("Average time for 1st query = %lf secs\n", t_first / nprocs);
 		printf("Time for 2..N queries = %lf secs\n", t_sum - t_first);
 		printf("Average time/query = %lf secs\n", t_sum / QUERYELEMS);
